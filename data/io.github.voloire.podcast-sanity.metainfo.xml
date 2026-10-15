@@ -23,6 +23,8 @@
     </p>
   </description>
   <launchable type="desktop-id">podcast-sanity.desktop</launchable>
+  <url type="homepage">https://github.com/voloire/podcast-sanity</url>
+  <url type="bugtracker">https://github.com/voloire/podcast-sanity/issues</url>
   <developer id="io.github.voloire">
     <name>Voloire</name>
   </developer>
