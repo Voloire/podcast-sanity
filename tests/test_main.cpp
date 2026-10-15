@@ -367,6 +367,9 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     auto a = sine(300.0, 0.3, 0.5, fs);
     auto silence = std::vector<float>(fs / 2, 0.0f);
     auto b = sine(300.0, 0.3, 0.5, fs);
+    // Reserve first: this also keeps GCC 15's -Warray-bounds analysis from
+    // reporting a false positive on the growing insert below.
+    x.reserve(a.size() + silence.size() + b.size());
     x.insert(x.end(), a.begin(), a.end());
     x.insert(x.end(), silence.begin(), silence.end());
     x.insert(x.end(), b.begin(), b.end());

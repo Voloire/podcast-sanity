@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8FA795"/>
+      <stop offset="1" stop-color="#5F7A66"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- waveform bars -->
+  <g fill="#F4F1E8">
+    <rect x="52" y="112" width="12" height="32" rx="6"/>
+    <rect x="74" y="92" width="12" height="72" rx="6"/>
+    <rect x="96" y="72" width="12" height="112" rx="6"/>
+    <rect x="118" y="100" width="12" height="56" rx="6"/>
+    <rect x="140" y="80" width="12" height="96" rx="6"/>
+    <rect x="162" y="108" width="12" height="40" rx="6"/>
+    <rect x="184" y="96" width="12" height="64" rx="6"/>
+  </g>
+  <!-- spark / magic dot -->
+  <circle cx="196" cy="64" r="14" fill="#F4F1E8" opacity="0.9"/>
+  <circle cx="196" cy="64" r="7" fill="#5F7A66"/>
+</svg>

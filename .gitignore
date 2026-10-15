@@ -9,3 +9,8 @@ cmake-build-*/
 # local scratch
 /tmp/
 *.log
+# packaged output
+*.deb
+*.msi
+*.rpm
+_CPack_Packages/

@@ -28,6 +28,7 @@ set(SANITY_CORE_SOURCES
   src/pipeline.cpp
   src/corpus.cpp
   src/metrics.cpp
+  src/encode.cpp
 )
 
 add_library(sanity_core STATIC ${SANITY_CORE_SOURCES})
@@ -46,11 +47,18 @@ if(PkgConfig_FOUND)
   pkg_check_modules(SNDFILE QUIET sndfile)
   if(MP3LAME_FOUND)
     set(SANITY_HAVE_MP3 TRUE)
+    target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARIES})
+    target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIRS})
   endif()
   if(SNDFILE_FOUND)
     set(SANITY_HAVE_SNDFILE TRUE)
+    target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARIES})
+    target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIRS})
   endif()
 endif()
+target_compile_definitions(sanity_core PUBLIC
+  SANITY_HAVE_MP3=$<BOOL:${SANITY_HAVE_MP3}>
+  SANITY_HAVE_SNDFILE=$<BOOL:${SANITY_HAVE_SNDFILE}>)
 
 # ---- CLI ------------------------------------------------------------------
 add_executable(podcast-sanity-render cli/render_main.cpp)
@@ -93,12 +101,23 @@ set_tests_properties(e2e PROPERTIES TIMEOUT 900)
 
 # ---- GUI ------------------------------------------------------------------
 if(SANITY_WITH_GUI)
-  find_package(Qt6 QUIET COMPONENTS Widgets)
+  find_package(Qt6 QUIET COMPONENTS Widgets Multimedia)
   if(Qt6_FOUND)
     set(CMAKE_AUTOMOC ON)
     add_executable(podcast-sanity
       gui/main.cpp
+      gui/mainwindow.h
       gui/mainwindow.cpp
+      gui/app_state.h
+      gui/audio_capture.h
+      gui/widgets.h
+      gui/theme.h
+      gui/pages/pages.h
+      gui/app_state.cpp
+      gui/audio_capture.cpp
+      gui/widgets.cpp
+      gui/theme.cpp
+      gui/pages/page_base.cpp
       gui/pages/record_page.cpp
       gui/pages/master_page.cpp
       gui/pages/standards_page.cpp
@@ -106,16 +125,50 @@ if(SANITY_WITH_GUI)
       gui/pages/export_page.cpp
       gui/pages/settings_page.cpp
       gui/pages/diagnostics_page.cpp
-      gui/widgets.cpp
-      gui/theme.cpp
     )
     target_link_libraries(podcast-sanity PRIVATE sanity_core Qt6::Widgets)
     target_include_directories(podcast-sanity PRIVATE gui)
     target_compile_definitions(podcast-sanity PRIVATE SANITY_VERSION="${PROJECT_VERSION}")
+    if(TARGET Qt6::Multimedia)
+      target_link_libraries(podcast-sanity PRIVATE Qt6::Multimedia)
+      target_compile_definitions(podcast-sanity PRIVATE SANITY_HAVE_QTMM=1)
+      message(STATUS "Qt6 Multimedia found: live recording enabled")
+    else()
+      target_compile_definitions(podcast-sanity PRIVATE SANITY_HAVE_QTMM=0)
+      message(STATUS "Qt6 Multimedia missing: recording works in file/corpus test mode only")
+    endif()
     message(STATUS "Qt6 found: building podcast-sanity GUI")
+
+    # Automated interface test: walks every page, runs the chain and exports an
+    # MP3. Runs under a virtual display in CI.
+    find_program(XVFB_RUN xvfb-run)
+    if(XVFB_RUN)
+      add_test(NAME gui
+        COMMAND ${XVFB_RUN} -a "--server-args=-screen 0 1400x900x24"
+                $<TARGET_FILE:podcast-sanity> --selftest --selftest-seconds 8)
+    else()
+      add_test(NAME gui
+        COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
+                $<TARGET_FILE:podcast-sanity> --selftest --selftest-seconds 8)
+    endif()
+    set_tests_properties(gui PROPERTIES TIMEOUT 300)
   else()
     message(STATUS "Qt6 not found: GUI skipped")
   endif()
+endif()
+
+# ---- install rules --------------------------------------------------------
+include(GNUInstallDirs)
+install(TARGETS podcast-sanity-render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET podcast-sanity)
+  install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(FILES data/podcast-sanity.desktop
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+  install(FILES data/io.github.voloire.podcast-sanity.metainfo.xml
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
+  install(FILES data/podcast-sanity.svg
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+          RENAME podcast-sanity.svg)
 endif()
 
 # ---- packaging -----------------------------------------------------------
@@ -123,8 +176,43 @@ set(CPACK_PACKAGE_NAME "podcast-sanity")
 set(CPACK_PACKAGE_VENDOR "Voloire")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Local podcast recording and automatic mastering")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_CONTACT "Voloire <dev@voloire.local>")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/voloire/podcast-sanity")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
+
+# --- Debian / Ubuntu -------------------------------------------------------
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Voloire")
 set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libqt6widgets6 | libgtk-3-0")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libqt6widgets6, libqt6multimedia6, libmp3lame0, libsndfile1")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-qpa-plugins, qt6-multimedia-plugins, ffmpeg")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+# --- Windows (WiX MSI) -----------------------------------------------------
+# A fixed Upgrade GUID means upgrades replace the previous install instead of
+# stacking next to it.
 set(CPACK_WIX_UPGRADE_GUID "9F2C6D4E-7B31-4A58-9C0E-2D5A6F1B8E30")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "podcast-sanity")
+# Branding images are optional: only reference the ones that exist so the MSI
+# still builds on a bare checkout.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
+  set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")
+  set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-dialog.bmp")
+  set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-dialog.bmp")
+endif()
+# The Windows bundle must carry the Qt runtime and the codec DLLs (optional).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
+  set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
+endif()
+
+if(WIN32)
+  set(CPACK_GENERATOR "WIX;ZIP")
+else()
+  set(CPACK_GENERATOR "DEB;TGZ")
+endif()
 include(CPack)

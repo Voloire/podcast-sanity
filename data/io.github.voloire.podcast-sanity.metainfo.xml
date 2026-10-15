@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.voloire.podcast-sanity</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>podcast-sanity</name>
+  <summary>Record and master a podcast locally, offline</summary>
+  <description>
+    <p>
+      podcast-sanity records audio and masters it on the machine, with no upload
+      and no cloud service. It applies the same chain a broadcast engineer would:
+      click and DC repair, adaptive mains hum notch, content aware high pass,
+      acoustic Filler Killer (hesitations and empty pauses, no transcription),
+      spectral denoise, de-reverb, de-esser, an adaptive leveler, a compressor
+      and loudness plus true peak normalisation to the delivery standard.
+    </p>
+    <p>
+      Loudness is measured with an implementation of ITU-R BS.1770-4 and true peak
+      with 4x oversampling. The defaults follow the Apple Podcasts authoring
+      practices (-19 LUFS mono, -16 LUFS stereo, true peak no higher than
+      -1 dBTP). Every run produces a JSON quality report with per stage timings,
+      real time factor, parameters hash and conformance flags.
+    </p>
+  </description>
+  <launchable type="desktop-id">podcast-sanity.desktop</launchable>
+  <url type="homepage">https://github.com/voloire/podcast-sanity</url>
+  <provides>
+    <binary>podcast-sanity</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Recorder</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-15">
+      <description>
+        <p>First release: recording, the full mastering chain, loudness and true
+        peak conformance, the Filler Killer, the session library and the export
+        to MP3, WAV and FLAC.</p>
+      </description>
+    </release>
+  </releases>
+</component>

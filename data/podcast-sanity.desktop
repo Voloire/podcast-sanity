@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=podcast-sanity
+GenericName=Podcast recorder and mastering
+Comment=Registra e masterizza il podcast in locale: pulizia automatica e loudness
+Comment[en]=Record and master a podcast locally: automatic cleanup and loudness
+Exec=podcast-sanity %f
+Icon=podcast-sanity
+Terminal=false
+Categories=AudioVideo;Audio;Recorder;
+Keywords=podcast;audio;recording;mastering;loudness;LUFS;
+MimeType=audio/x-wav;
+StartupNotify=true
+StartupWMClass=podcast-sanity
