@@ -100,6 +100,9 @@ bool parse(int argc, char** argv, Args& a) {
         if (k == "--help" || k == "-h") {
             usage();
             std::exit(0);
+        } else if (k == "--version" || k == "-V") {
+            std::printf("podcast-sanity-render %s\n", SANITY_VERSION);
+            std::exit(0);
         } else if (k == "--out")
             a.out = argv[++i];
         else if (k == "--report")

@@ -23,9 +23,12 @@
     </p>
   </description>
   <launchable type="desktop-id">podcast-sanity.desktop</launchable>
-  <url type="homepage">https://github.com/voloire/podcast-sanity</url>
+  <developer id="io.github.voloire">
+    <name>Voloire</name>
+  </developer>
   <provides>
     <binary>podcast-sanity</binary>
+    <binary>podcast-sanity-render</binary>
   </provides>
   <categories>
     <category>AudioVideo</category>
