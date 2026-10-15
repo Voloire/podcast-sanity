@@ -1,0 +1,11 @@
+# build trees
+build/
+build-*/
+cmake-build-*/
+# editor / OS noise
+*.swp
+*~
+.DS_Store
+# local scratch
+/tmp/
+*.log
