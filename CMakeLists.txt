@@ -10,7 +10,11 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_compile_options(-Wall -Wextra -Wpedantic)
+if(MSVC)
+  add_compile_options(/W4 /permissive- /utf-8)
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
 option(SANITY_WITH_GUI "Build the Qt6 desktop application" ON)
 option(SANITY_WITH_EBUR128 "Cross-check loudness against libebur128 in tests" ON)
@@ -39,23 +43,61 @@ if(SANITY_SANITIZE)
 endif()
 
 # ---- codec adapters (optional, detected) ----------------------------------
+# Two discovery paths, because the same two libraries are packaged very
+# differently on Linux (pkg-config) and on Windows (vcpkg, no pkg-config).
 find_package(PkgConfig QUIET)
 set(SANITY_HAVE_MP3 FALSE)
 set(SANITY_HAVE_SNDFILE FALSE)
+
 if(PkgConfig_FOUND)
   pkg_check_modules(MP3LAME QUIET lame)
   pkg_check_modules(SNDFILE QUIET sndfile)
   if(MP3LAME_FOUND)
     set(SANITY_HAVE_MP3 TRUE)
+    set(MP3LAME_LIBRARY "${MP3LAME_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIRS})
   endif()
   if(SNDFILE_FOUND)
     set(SANITY_HAVE_SNDFILE TRUE)
+    set(SNDFILE_LIBRARY "${SNDFILE_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIRS})
   endif()
 endif()
+
+# Fallback: find_path/find_library. This is the only path on MSVC + vcpkg,
+# which installs lame/lame.h and sndfile.h but no pkg-config metadata.
+if(NOT SANITY_HAVE_MP3)
+  find_path(MP3LAME_INCLUDE_DIR NAMES lame/lame.h)
+  find_library(MP3LAME_LIBRARY NAMES mp3lame lame libmp3lame)
+  if(MP3LAME_INCLUDE_DIR AND MP3LAME_LIBRARY)
+    set(SANITY_HAVE_MP3 TRUE)
+    target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARY})
+    target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIR})
+  endif()
+endif()
+if(NOT SANITY_HAVE_SNDFILE)
+  find_path(SNDFILE_INCLUDE_DIR NAMES sndfile.h)
+  find_library(SNDFILE_LIBRARY NAMES sndfile libsndfile)
+  if(SNDFILE_INCLUDE_DIR AND SNDFILE_LIBRARY)
+    set(SANITY_HAVE_SNDFILE TRUE)
+    target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARY})
+    target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIR})
+  endif()
+endif()
+
+if(SANITY_HAVE_MP3)
+  message(STATUS "MP3 export enabled (lame at ${MP3LAME_LIBRARY})")
+else()
+  message(STATUS "MP3 export disabled: lame not found")
+endif()
+if(SANITY_HAVE_SNDFILE)
+  message(STATUS "FLAC/Ogg export enabled (libsndfile at ${SNDFILE_LIBRARY})")
+else()
+  message(STATUS "FLAC/Ogg export disabled: libsndfile not found")
+endif()
+
 target_compile_definitions(sanity_core PUBLIC
   SANITY_HAVE_MP3=$<BOOL:${SANITY_HAVE_MP3}>
   SANITY_HAVE_SNDFILE=$<BOOL:${SANITY_HAVE_SNDFILE}>)
@@ -139,6 +181,17 @@ if(SANITY_WITH_GUI)
     endif()
     message(STATUS "Qt6 found: building podcast-sanity GUI")
 
+    # Deploy the Qt runtime next to the executable so the packaged tree is
+    # self-contained. Without this the MSI/ZIP would ship an .exe that cannot
+    # start, because CPack only knows about the targets we install by hand.
+    if(WIN32)
+      qt_generate_deploy_app_script(
+        TARGET podcast-sanity
+        OUTPUT_SCRIPT qt_deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR)
+      install(SCRIPT ${qt_deploy_script})
+    endif()
+
     # Automated interface test: walks every page, runs the chain and exports an
     # MP3. Runs under a virtual display in CI.
     find_program(XVFB_RUN xvfb-run)
@@ -198,6 +251,7 @@ set(CPACK_WIX_PROGRAM_MENU_FOLDER "podcast-sanity")
 # still builds on a bare checkout.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
   set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
+  set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")
   set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")

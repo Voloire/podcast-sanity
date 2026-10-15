@@ -596,10 +596,13 @@ void Segmenter::features(const std::vector<float>& x, std::vector<FrameFeat>& ou
     } else {
         std::vector<std::thread> pool;
         bool parallel = false;
+        // The work counter must outlive the workers: they are joined after the
+        // block below, so a counter declared inside it would already be out of
+        // scope while they still fetch from it.
+        std::atomic<int> next{0};
         try {
             const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
             const int nthreads = std::min<int>(ntask, static_cast<int>(hw));
-            std::atomic<int> next{0};
             for (int t = 0; t < nthreads; t++) {
                 pool.emplace_back([&] {
                     for (;;) {
