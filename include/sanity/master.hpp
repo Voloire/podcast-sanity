@@ -8,6 +8,7 @@
 
 #include "sanity/audio.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/music_bed.hpp"
 
 namespace sanity {
 
@@ -41,6 +42,9 @@ struct Params {
 
     // --- Filler Killer ---------------------------------------------------
     FillerMode filler = FillerMode::Off;
+
+    // --- music bed -------------------------------------------------------
+    MusicBedOptions music_bed;
 
     // --- output ----------------------------------------------------------
     int out_sample_rate = 0;             // 0 = keep input rate
@@ -169,7 +173,8 @@ std::vector<float> remove_fillers(const std::vector<float>& mono, int sample_rat
 
 // Full mastering run. `out` matches the requested output rate/channels.
 Report master(const AudioBuffer& in, const Params& params, AudioBuffer& out);
+Report master(const AudioBuffer& in, const Params& params, const AudioBuffer* music, AudioBuffer& out);
 
-std::string params_hash(const Params& p);
+std::string params_hash(const Params& p, const AudioBuffer* music = nullptr);
 
 }  // namespace sanity

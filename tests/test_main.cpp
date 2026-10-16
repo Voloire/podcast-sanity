@@ -20,6 +20,7 @@
 #include "sanity/loudness.hpp"
 #include "sanity/master.hpp"
 #include "sanity/metrics.hpp"
+#include "sanity/music_bed.hpp"
 #include "tinytest.hpp"
 
 #if SANITY_HAVE_EBUR128
@@ -33,6 +34,82 @@ extern "C" {
 #endif
 
 using namespace sanity;
+
+namespace {
+// A three note loop, 2 s, so looping is exercised on a 12 s episode.
+AudioBuffer test_music(int fs) {
+    AudioBuffer m = AudioBuffer::zeros(fs, 2, static_cast<std::size_t>(fs) * 2);
+    for (std::size_t i = 0; i < m.frames(); i++) {
+        const double t = static_cast<double>(i) / fs;
+        const double v = 0.2 * (std::sin(kTwoPi * 220 * t) + 0.6 * std::sin(kTwoPi * 330 * t) +
+                                0.4 * std::sin(kTwoPi * 440 * t));
+        m.data[2 * i] = static_cast<float>(v);
+        m.data[2 * i + 1] = static_cast<float>(0.8 * v);
+    }
+    return m;
+}
+double rms_db_over(const std::vector<float>& x, std::size_t a, std::size_t b) {
+    double s = 0.0;
+    for (std::size_t i = a; i < b && i < x.size(); i++) s += static_cast<double>(x[i]) * x[i];
+    return b > a ? 10.0 * std::log10(s / static_cast<double>(b - a) + 1e-30) : -200.0;
+}
+}  // namespace
+
+TT_CASE("music bed sits at the requested level in pauses and ducks under speech") {
+    const int fs = 48000;
+    // Controlled speech from 2 to 6 seconds leaves enough silence to measure
+    // the 300 ms hold plus the 700 ms release independently of the segmenter.
+    // The end-to-end bed scenario covers real corpus features after filler cuts.
+    std::vector<float> speech(static_cast<std::size_t>(fs) * 12, 0.0f);
+    for (std::size_t i = 2 * fs; i < 6 * fs; i++)
+        speech[i] = static_cast<float>(0.2 * std::sin(kTwoPi * 180.0 * i / fs));
+    std::vector<FrameFeat> feats(1200);
+    for (std::size_t f = 200; f < 600; f++) feats[f].speech = true;
+    MusicBedOptions o;
+    o.enabled = true;
+    o.bed_level_db = -14.0;
+    o.duck_db = -10.0;
+    o.fade_in_s = 0.5;
+    o.fade_out_s = 0.5;
+    o.tail_s = 2.0;
+    MusicBedInfo info;
+    const std::vector<float> bed = render_music_bed(speech, fs, feats, test_music(fs), o, &info);
+    CHECK(info.applied);
+    CHECK(bed.size() == speech.size() + static_cast<std::size_t>(2.0 * fs));
+    CHECK(info.frames_added == static_cast<std::size_t>(2.0 * fs));
+    CHECK_GE(static_cast<int>(info.loops), 5);
+    // Measure settled levels: 1 second into speech, and 3 seconds into the
+    // following pause (well past hold and several release time constants).
+    const std::size_t hop = static_cast<std::size_t>(segmenter_hop(fs));
+    const std::size_t pause_at = 9 * fs, speech_at = 3 * fs;
+    CHECK(!feats[pause_at / hop].speech && feats[speech_at / hop].speech);
+    const double in_pause = rms_db_over(bed, pause_at + 15 * hop, pause_at + 45 * hop);
+    const double in_speech = rms_db_over(bed, speech_at + 15 * hop, speech_at + 45 * hop);
+    CHECK_NEAR(in_pause, info.bed_level_db, 2.0);
+    CHECK_LE(in_speech, in_pause - 10.0 + 2.0);
+    CHECK_NEAR(info.bed_level_db, info.speech_level_db - 14.0, 0.5);
+    // Fades: the first and the last sample region are quiet.
+    CHECK_LE(rms_db_over(bed, 0, fs / 50), in_pause - 20.0);
+    CHECK_LE(rms_db_over(bed, bed.size() - fs / 50, bed.size()), in_pause - 20.0);
+    // The mix adds the bed and extends the speech by the tail.
+    std::vector<float> mixed = speech;
+    const MusicBedInfo mi = mix_music_bed(mixed, fs, feats, test_music(fs), o);
+    CHECK(mi.applied);
+    CHECK(mixed.size() == bed.size());
+    CHECK_NEAR(mixed[pause_at + 20 * hop], speech[pause_at + 20 * hop] + bed[pause_at + 20 * hop], 1e-6);
+}
+
+TT_CASE("music bed is a no-op when disabled or when the music is empty") {
+    const int fs = 48000;
+    std::vector<float> speech(fs, 0.1f);
+    std::vector<FrameFeat> feats(100);
+    MusicBedOptions o;
+    AudioBuffer none;
+    CHECK(!mix_music_bed(speech, fs, feats, test_music(fs), o).applied);  // disabled
+    o.enabled = true;
+    CHECK(!mix_music_bed(speech, fs, feats, none, o).applied);           // nothing to mix
+    CHECK(speech.size() == static_cast<std::size_t>(fs));
+}
 
 TT_CASE("distribution profiles: unique ids, one recommended, the recommended one is the hosting envelope") {
     const auto& all = distribution_profiles();

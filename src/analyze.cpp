@@ -153,20 +153,31 @@ Analysis analyze_impl(const std::vector<float>& mono, int sample_rate,
 
 }  // namespace
 
-std::string params_hash(const Params& p) {
+std::string params_hash(const Params& p, const AudioBuffer* music) {
     char buf[512];
     std::snprintf(buf, sizeof(buf),
-                  "v1|%d|%d|%.4f|%.4f|%.4f|%.4f|%.4f|%d|%.4f|%d|%d|%d|%d|%d|%d|%.4f|%d|%d|%d|%d",
+                  "v2|%d|%d|%.4f|%.4f|%.4f|%.4f|%.4f|%d|%.4f|%d|%d|%d|%d|%d|%d|%.4f|%d|%d|%d|%d"
+                  "|%d|%.2f|%.2f|%.1f|%.1f|%.1f|%.2f|%.2f|%.2f|%.2f|%d",
                   static_cast<int>(p.preset), p.normalize ? 1 : 0, p.target_lufs,
                   p.target_true_peak_db, p.max_lra, p.max_short_term, p.max_momentary,
                   p.adaptive_leveler ? 1 : 0, p.leveler_strength, p.compress ? 1 : 0,
                   p.adaptive_highpass ? 1 : 0, p.dehum ? 1 : 0, p.declick ? 1 : 0,
                   p.deess ? 1 : 0, p.power_clean ? 1 : 0, p.denoise_strength, p.dereverb ? 1 : 0,
-                  static_cast<int>(p.filler), p.out_sample_rate, p.out_channels);
+                  static_cast<int>(p.filler), p.out_sample_rate, p.out_channels,
+                  p.music_bed.enabled ? 1 : 0, p.music_bed.bed_level_db, p.music_bed.duck_db,
+                  p.music_bed.attack_ms, p.music_bed.release_ms, p.music_bed.hold_ms,
+                  p.music_bed.fade_in_s, p.music_bed.fade_out_s, p.music_bed.offset_s,
+                  p.music_bed.tail_s, p.music_bed.loop ? 1 : 0);
+    std::string serialized(buf);
+    if (music) {
+        std::snprintf(buf, sizeof(buf), "|music:%zu:%d:%d", music->frames(), music->channels,
+                      music->sample_rate);
+        serialized += buf;
+    }
     // FNV-1a 64
     unsigned long long h = 1469598103934665603ULL;
-    for (const char* c = buf; *c; c++) {
-        h ^= static_cast<unsigned char>(*c);
+    for (char c : serialized) {
+        h ^= static_cast<unsigned char>(c);
         h *= 1099511628211ULL;
     }
     std::snprintf(buf, sizeof(buf), "%016llx", h);

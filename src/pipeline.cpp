@@ -115,6 +115,20 @@ void write_params(JsonWriter& j, const Params& p) {
         case FillerMode::Off: break;
     }
     j.member("filler", std::string(f));
+    j.key("music_bed");
+    j.begin_object();
+    j.member("enabled", p.music_bed.enabled);
+    j.member("bed_level_db", p.music_bed.bed_level_db);
+    j.member("duck_db", p.music_bed.duck_db);
+    j.member("attack_ms", p.music_bed.attack_ms);
+    j.member("release_ms", p.music_bed.release_ms);
+    j.member("hold_ms", p.music_bed.hold_ms);
+    j.member("fade_in_s", p.music_bed.fade_in_s);
+    j.member("fade_out_s", p.music_bed.fade_out_s);
+    j.member("offset_s", p.music_bed.offset_s);
+    j.member("tail_s", p.music_bed.tail_s);
+    j.member("loop", p.music_bed.loop);
+    j.end_object();
     j.member("out_sample_rate", p.out_sample_rate);
     j.member("out_channels", p.out_channels);
     j.end_object();
@@ -247,10 +261,14 @@ std::string Report::to_summary() const {
 }
 
 Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
+    return master(in, p, nullptr, out);
+}
+
+Report master(const AudioBuffer& in, const Params& p, const AudioBuffer* music, AudioBuffer& out) {
     Report r;
     r.version = SANITY_VERSION;
     r.params = p;
-    r.params_hash = params_hash(p);
+    r.params_hash = params_hash(p, music);
     r.frames_in = in.frames();
 
     const int in_rate = in.sample_rate > 0 ? in.sample_rate : 48000;
@@ -372,6 +390,17 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
         add_metric(r, "compressor", "threshold_db", c.threshold_db);
         add_metric(r, "compressor", "ratio", c.ratio);
         add_metric(r, "compressor", "average_reduction_db", c.gain_reduction_db);
+    });
+
+    // ---------------------------------------------------- music bed
+    const bool do_bed = p.music_bed.enabled && music && !music->data.empty();
+    run_stage(r, "music_bed", do_bed, audio_ms, [&] {
+        const MusicBedInfo b = mix_music_bed(mono, in_rate, feats, *music, p.music_bed);
+        add_metric(r, "music_bed", "speech_level_db", b.speech_level_db);
+        add_metric(r, "music_bed", "bed_level_db", b.bed_level_db);
+        add_metric(r, "music_bed", "duck_ratio", b.duck_ratio);
+        add_metric(r, "music_bed", "loops", static_cast<double>(b.loops));
+        add_metric(r, "music_bed", "tail_s", static_cast<double>(b.frames_added) / in_rate);
     });
 
     // ---------------------------------------------------- 10. output format

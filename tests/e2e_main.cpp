@@ -460,6 +460,37 @@ TT_CASE("e2e: the recommended delivery decodes within tolerance") {
     std::filesystem::remove(path, ec);
 }
 
+TT_CASE("e2e: a music bed keeps the delivery conformant and the filler cut intact") {
+    if (!wanted("bed")) return;
+    Params p = base_params();
+    p.music_bed.enabled = true;
+    p.music_bed.tail_s = 2.0;
+    CorpusItem item = make_item("home", opts().seconds);
+    const AudioBuffer in = buffer_of(item.degraded, item.sample_rate);
+    AudioBuffer music = AudioBuffer::zeros(44100, 2, 44100 * 3);   // different rate on purpose
+    for (std::size_t i = 0; i < music.frames(); i++) {
+        const float v = static_cast<float>(0.2 * std::sin(kTwoPi * 261.6 * i / 44100.0));
+        music.data[2 * i] = v;
+        music.data[2 * i + 1] = v;
+    }
+    AudioBuffer out, out_plain;
+    const Report rep = master(in, p, &music, out);
+    Params plain = p;
+    plain.music_bed.enabled = false;
+    const Report rep_plain = master(in, plain, &music, out_plain);
+    print_line("bed", rep.after.integrated_lufs, rep.after.true_peak_db);
+    CHECK(rep.conformant);
+    CHECK(out.frames() == out_plain.frames() + static_cast<std::size_t>(2.0 * item.sample_rate));
+    CHECK(rep.fillers_removed == rep_plain.fillers_removed);
+    bool staged = false;
+    for (const StageTiming& s : rep.stages) if (s.name == "music_bed" && s.enabled) staged = true;
+    CHECK(staged);
+    CHECK(rep.params_hash != rep_plain.params_hash);
+    AudioBuffer out2;
+    const Report rep2 = master(in, p, &music, out2);
+    CHECK(out2.data == out.data);
+}
+
 // The harness itself is a quality gate: scenarios must have run and the report
 // must be machine readable even when checks failed.
 TT_CASE("e2e: harness produced a report for every scenario") {
