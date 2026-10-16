@@ -33,6 +33,27 @@ extern "C" {
 
 using namespace sanity;
 
+TT_CASE("audio_read opens every format the build can write") {
+    namespace fs = std::filesystem;
+    AudioBuffer a = AudioBuffer::zeros(48000, 1, 48000);
+    for (std::size_t i = 0; i < a.frames(); i++) a.data[i] = static_cast<float>(0.3 * std::sin(kTwoPi * 220 * i / 48000.0));
+    for (auto f : {ExportFormat::Wav16, ExportFormat::Flac, ExportFormat::Ogg, ExportFormat::Mp3}) {
+        if (!encoder_available(f)) continue;
+        const auto path = fs::temp_directory_path() / ("sanity-read" + export_extension(f));
+        ExportOptions o;
+        o.format = f;
+        std::string err;
+        CHECK(encode_audio(path.string(), a, o, err));
+        AudioBuffer b;
+        CHECK(audio_read(path.string(), b, err));
+        CHECK(b.sample_rate == 48000);
+        CHECK(b.channels == 1);
+        CHECK(b.frames() >= 47000);  // lossy decoders may trim priming samples
+        std::error_code ec;
+        fs::remove(path, ec);
+    }
+}
+
 TT_CASE("exports: Unicode paths, formats and stereo channel separation") {
     namespace fs = std::filesystem;
     const auto dir = fs::temp_directory_path() /

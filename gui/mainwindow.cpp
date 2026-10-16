@@ -191,11 +191,11 @@ void MainWindow::open_audio() {
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Apri un audio"),
         QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-        QStringLiteral("Audio (*.wav);;Tutti i file (*)"));
+        QString::fromStdString(sanity::audio_read_filter()));
     if (path.isEmpty()) return;
     sanity::AudioBuffer b;
     std::string err;
-    if (!sanity::wav_read(path.toStdString(), b, err)) {
+    if (!sanity::audio_read(path.toStdString(), b, err)) {
         QMessageBox::warning(this, QStringLiteral("Apri"),
                              QStringLiteral("Impossibile leggere il file:\n%1")
                                  .arg(QString::fromStdString(err)));

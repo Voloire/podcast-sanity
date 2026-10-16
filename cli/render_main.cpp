@@ -260,7 +260,7 @@ int main(int argc, char** argv) {
 
     AudioBuffer in;
     std::string err;
-    if (!wav_read(a.in, in, err)) {
+    if (!audio_read(a.in, in, err)) {
         std::fprintf(stderr, "cannot read %s: %s\n", a.in.c_str(), err.c_str());
         return 1;
     }

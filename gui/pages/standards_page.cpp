@@ -256,11 +256,11 @@ void StandardsPage::measure_file() {
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Scegli un audio"), QStandardPaths::writableLocation(
                                                     QStandardPaths::MusicLocation),
-        QStringLiteral("Audio (*.wav *.flac *.ogg *.mp3);;Tutti i file (*)"));
+        QString::fromStdString(sanity::audio_read_filter()));
     if (path.isEmpty()) return;
     sanity::AudioBuffer b;
     std::string err;
-    if (!sanity::wav_read(path.toStdString(), b, err)) {
+    if (!sanity::audio_read(path.toStdString(), b, err)) {
         measured_->setText(QStringLiteral("Impossibile leggere: %1")
                                .arg(QString::fromStdString(err)));
         measure_card_->set_state(State::Error, QStringLiteral("Errore"));

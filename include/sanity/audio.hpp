@@ -46,6 +46,9 @@ struct AudioBuffer {
 
 // Reads PCM16, PCM24, PCM32, FLOAT32 and FLOAT64 WAV (also RF64/BW64 headers).
 bool wav_read(const std::string& path, AudioBuffer& out, std::string& err);
+// Reads WAV natively and compressed formats through libsndfile when available.
+bool audio_read(const std::string& path, AudioBuffer& out, std::string& err);
+std::string audio_read_filter();
 // Writes 32-bit float WAV when float32 is true, else 16-bit PCM.
 bool wav_write(const std::string& path, const AudioBuffer& in, bool float32, std::string* err);
 // Writes 24-bit PCM WAV without going through libsndfile.

@@ -24,6 +24,7 @@ option(SANITY_REQUIRE_CODECS "Fail if MP3 or FLAC/Ogg support is missing" OFF)
 set(SANITY_CORE_SOURCES
   src/json.cpp
   src/io_wav.cpp
+  src/io_sndfile.cpp
   src/dsp.cpp
   src/loudness.cpp
   src/clean.cpp

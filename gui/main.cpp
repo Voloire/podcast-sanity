@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
     if (!rest.isEmpty() && QFileInfo::exists(rest.first())) {
         sanity::AudioBuffer b;
         std::string err;
-        if (sanity::wav_read(rest.first().toStdString(), b, err)) {
+        if (sanity::audio_read(rest.first().toStdString(), b, err)) {
             gui::AppState::get().set_audio(b, rest.first(), QStringLiteral("file"));
             gui::AppState::get().session().name = QFileInfo(rest.first()).completeBaseName();
         }
