@@ -41,6 +41,11 @@ set(SANITY_CORE_SOURCES
 
 add_library(sanity_core STATIC ${SANITY_CORE_SOURCES})
 target_include_directories(sanity_core PUBLIC include)
+# The version travels with the core: the report and the summary header read it
+# from Report::version, which pipeline.cpp fills from SANITY_VERSION. Without
+# this define the core keeps its 0.1.0 fallback while the executables are built
+# at the project version, so --version and the report would disagree.
+target_compile_definitions(sanity_core PUBLIC SANITY_VERSION="${PROJECT_VERSION}")
 if(SANITY_SANITIZE)
   target_compile_options(sanity_core PUBLIC -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(sanity_core PUBLIC -fsanitize=address,undefined)
