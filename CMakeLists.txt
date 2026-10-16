@@ -108,6 +108,14 @@ endif()
 
 add_test(NAME unit COMMAND sanity_tests)
 
+# CLI contract: a missing option value is an error, not a crash; --help lists
+# the distribution switch added in Phase 3.
+add_test(NAME cli_missing_value COMMAND podcast-sanity-render in.wav --out)
+set_tests_properties(cli_missing_value PROPERTIES
+  PASS_REGULAR_EXPRESSION "option --out needs a value")
+add_test(NAME cli_help COMMAND podcast-sanity-render --help)
+set_tests_properties(cli_help PROPERTIES PASS_REGULAR_EXPRESSION "--deliver")
+
 # ---- end-to-end harness ----------------------------------------------------
 # Generates synthetic episodes with ground truth, runs the whole chain and
 # judges the result. Slower than the unit tests, so it is a separate target.
