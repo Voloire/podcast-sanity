@@ -264,13 +264,8 @@ QVector<Session> AppState::library_sessions() const {
         const QJsonObject in = o.value("input").toObject();
         s.audio.sample_rate = in.value("sample_rate").toInt(48000);
         s.audio.channels = in.value("channels").toInt(1);
-        const double secs = in.value("seconds").toDouble(0.0);
-        if (secs > 0.0) {
-            s.has_audio = true;
-            s.audio.data.assign(static_cast<std::size_t>(secs * s.audio.sample_rate) *
-                                    static_cast<std::size_t>(s.audio.channels),
-                                0.0f);
-        }
+        s.seconds_hint = in.value("seconds").toDouble(0.0);
+        s.has_audio = false;  // the samples stay on disk until load_session()
         out.push_back(s);
     }
     std::sort(out.begin(), out.end(), [](const Session& a, const Session& b) {
@@ -372,11 +367,24 @@ bool AppState::load_session(const QString& id, QString* error) {
         s.mastered = mst;
         s.has_mastered = true;
     }
-    QFile rf(dir.filePath(kReportName));
-    if (rf.open(QIODevice::ReadOnly)) {
-        // The report is only used for display; the numeric fields the app shows
-        // are re-derived from the mastered audio on load.
-        s.has_report = s.has_mastered;
+    s.params = default_params();
+    s.has_report = false;
+    if (s.has_mastered) {
+        // The engine is the source of truth: the numeric report is re-derived
+        // from the mastered audio; report.json on disk is for humans and tools.
+        s.report = {};
+        s.report.version = SANITY_VERSION;
+        s.report.params = s.params;
+        s.report.before = sanity::analyze(s.audio);
+        s.report.after = sanity::analyze(s.mastered);
+        const double target = s.params.target_lufs != 0.0
+                                  ? s.params.target_lufs
+                                  : (s.mastered.channels > 1 ? -16.0 : -19.0);
+        s.report.conformant_loudness = std::fabs(s.report.after.integrated_lufs - target) <= 1.0;
+        s.report.conformant_true_peak =
+            s.report.after.true_peak_db <= s.params.target_true_peak_db + 0.05;
+        s.report.conformant = s.report.conformant_loudness && s.report.conformant_true_peak;
+        s.has_report = true;
     }
     session_ = s;
     emit audio_changed();

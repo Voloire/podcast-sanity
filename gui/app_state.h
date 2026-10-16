@@ -43,7 +43,8 @@ struct Session {
     bool has_report = false;
     bool saved = false;
 
-    double duration() const { return has_audio ? audio.duration() : 0.0; }
+    double seconds_hint = 0.0;  // duration from session.json while the audio is not loaded
+    double duration() const { return has_audio ? audio.duration() : seconds_hint; }
 };
 
 class AppState : public QObject {
