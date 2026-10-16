@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QThread>
 #include <QVector>
+#include <memory>
 
 #include "sanity/audio.hpp"
 #include "sanity/encode.hpp"
@@ -20,6 +21,7 @@
 Q_DECLARE_METATYPE(sanity::AudioBuffer)
 Q_DECLARE_METATYPE(sanity::Report)
 Q_DECLARE_METATYPE(sanity::Params)
+Q_DECLARE_METATYPE(std::shared_ptr<const sanity::AudioBuffer>)
 
 namespace gui {
 
@@ -37,6 +39,9 @@ struct Session {
     sanity::Params params;
     sanity::AudioBuffer mastered;
     sanity::Report report;
+    QString music_path;
+    std::shared_ptr<const sanity::AudioBuffer> music;
+    bool has_music = false;
 
     bool has_audio = false;
     bool has_mastered = false;
@@ -61,6 +66,9 @@ public:
     void clear_audio();
     void set_mastered(const sanity::AudioBuffer& b, const sanity::Report& r);
     void set_params(const sanity::Params& p);
+    bool set_music(const QString& path, QString* error);
+    void set_music_buffer(std::shared_ptr<const sanity::AudioBuffer> music, const QString& label);
+    void clear_music();
 
     // ---- library -------------------------------------------------------
     QString library_dir() const;
@@ -87,6 +95,7 @@ signals:
     void audio_changed();
     void mastered_changed();
     void params_changed();
+    void music_changed();
     void library_changed();
     void status_message(const QString& text);
     void mastering_started();

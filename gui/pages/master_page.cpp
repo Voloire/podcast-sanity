@@ -1,6 +1,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -12,6 +14,7 @@
 #include <QSlider>
 #include <QStandardPaths>
 #include <QTableWidget>
+#include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -19,6 +22,8 @@
 #include <cmath>
 
 #include "pages/pages.h"
+#include "sanity/dynamics.hpp"
+#include "sanity/music_bed.hpp"
 #include "theme.h"
 #include "widgets.h"
 
@@ -223,6 +228,76 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     }
     col->insertWidget(at + 3, filler_card_);
 
+    music_card_ = new Card(QStringLiteral("Sottofondo musicale"),
+        QStringLiteral("Musica sotto la voce: abbassata mentre parli, in primo piano nelle pause, con dissolvenze."));
+    music_card_->setObjectName("MusicBedCard");
+    music_pick_ = new QPushButton(QStringLiteral("Scegli musica..."));
+    connect(music_pick_, &QPushButton::clicked, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Scegli musica"), {},
+            QString::fromStdString(sanity::audio_read_filter()));
+        if (path.isEmpty()) return;
+        QString error;
+        if (!AppState::get().set_music(path, &error)) music_info_->setText(error);
+        else music_enabled_->setChecked(true);
+    });
+    music_card_->add_widget(music_pick_);
+    music_info_ = new QLabel();
+    music_info_->setObjectName("Mono");
+    music_info_->setWordWrap(true);
+    music_card_->add_widget(music_info_);
+    music_enabled_ = new QCheckBox(QStringLiteral("Attivo"));
+    connect(music_enabled_, &QCheckBox::toggled, this, [this] { sync_params(); });
+    music_card_->add_widget(music_enabled_);
+    auto slider = [this](QSlider*& control, QLabel*& label, int low, int high,
+                         const QString& title, const QString& hint) {
+        control = new QSlider(Qt::Horizontal);
+        control->setRange(low, high);
+        label = new QLabel();
+        label->setObjectName("Mono");
+        auto* host = new QWidget();
+        auto* row = new QHBoxLayout(host);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->addWidget(control, 1);
+        row->addWidget(label);
+        connect(control, &QSlider::valueChanged, this, [this, label](int value) {
+            label->setText(QStringLiteral("%1 dB").arg(value));
+            sync_params();
+        });
+        music_card_->add_widget(make_row(title, host, hint));
+    };
+    slider(music_level_, music_level_label_, -30, -6, QStringLiteral("Livello nelle pause"),
+           QStringLiteral("Livello della musica nelle pause, rispetto alla voce."));
+    slider(music_duck_, music_duck_label_, -24, 0, QStringLiteral("Ducking"),
+           QStringLiteral("Quanto scende mentre parli."));
+    auto seconds = [this](const QString& title, double maximum) {
+        auto* control = new QDoubleSpinBox();
+        control->setRange(0, maximum);
+        control->setDecimals(1);
+        control->setSingleStep(0.5);
+        control->setSuffix(QStringLiteral(" s"));
+        connect(control, &QDoubleSpinBox::valueChanged, this, [this] { sync_params(); });
+        music_card_->add_widget(make_row(title, control));
+        return control;
+    };
+    music_fade_in_ = seconds(QStringLiteral("Dissolvenza iniziale"), 10);
+    music_fade_out_ = seconds(QStringLiteral("Dissolvenza finale"), 10);
+    music_offset_ = seconds(QStringLiteral("Inizio sottofondo"), 60);
+    music_tail_ = seconds(QStringLiteral("Coda dopo la voce"), 30);
+    music_loop_ = new QCheckBox(QStringLiteral("Ripeti se piu corta dell'episodio"));
+    connect(music_loop_, &QCheckBox::toggled, this, [this] { sync_params(); });
+    music_card_->add_widget(music_loop_);
+    music_preview_ = new QPushButton(QStringLiteral("Anteprima 15 s"));
+    music_preview_stop_ = new QPushButton(QStringLiteral("Stop"));
+    connect(music_preview_, &QPushButton::clicked, this, &MasterPage::preview_music);
+    connect(music_preview_stop_, &QPushButton::clicked, this, &MasterPage::stop_playback);
+    auto* preview = new QWidget();
+    auto* preview_row = new QHBoxLayout(preview);
+    preview_row->setContentsMargins(0, 0, 0, 0);
+    preview_row->addWidget(music_preview_);
+    preview_row->addWidget(music_preview_stop_);
+    music_card_->add_widget(preview);
+    col->insertWidget(at + 4, music_card_);
+
     // -------------------------------------------------------------- result
     result_card_ = new Card(QStringLiteral("Risultato"),
                             QStringLiteral("Confronto prima e dopo, con lo stato di conformita."));
@@ -285,7 +360,7 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
         abhl->addStretch(1);
         result_card_->add_widget(ab);
     }
-    col->insertWidget(at + 4, result_card_);
+    col->insertWidget(at + 5, result_card_);
 
     // -------------------------------------------------------------- stages
     stages_card_ = new Card(QStringLiteral("Diagnostica per stadio"),
@@ -300,7 +375,7 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     stages_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     stages_->setMinimumHeight(240);
     stages_card_->add_widget(stages_);
-    col->insertWidget(at + 5, stages_card_);
+    col->insertWidget(at + 6, stages_card_);
 
     connect(&AppState::get(), &AppState::mastering_started, this, [this] {
         processing_ = true;
@@ -343,10 +418,20 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
         show_report();
     });
     connect(&AppState::get(), &AppState::audio_changed, this, &MasterPage::refresh_from_state);
+    connect(&AppState::get(), &AppState::music_changed, this, &MasterPage::refresh_music);
+    connect(&AppState::get(), &AppState::params_changed, this, [this] {
+        load_params(AppState::get().session().params);
+    });
     load_params(AppState::get().default_params());
+    refresh_music();
+}
+
+MasterPage::~MasterPage() {
+    if (music_thread_) music_thread_->wait();
 }
 
 void MasterPage::load_params(const sanity::Params& p) {
+    loading_params_ = true;
     preset_->setCurrentIndex(p.preset == sanity::Preset::Music ? 1 : 0);
     power_clean_->setChecked(p.power_clean);
     dereverb_->setChecked(p.dereverb);
@@ -363,9 +448,22 @@ void MasterPage::load_params(const sanity::Params& p) {
     normalize_->setChecked(p.normalize);
     for (int i = 0; i < filler_->count(); i++)
         if (filler_->itemData(i).toInt() == static_cast<int>(p.filler)) filler_->setCurrentIndex(i);
+    music_enabled_->setChecked(p.music_bed.enabled);
+    music_level_->setValue(static_cast<int>(std::lround(p.music_bed.bed_level_db)));
+    music_duck_->setValue(static_cast<int>(std::lround(p.music_bed.duck_db)));
+    music_level_label_->setText(QStringLiteral("%1 dB").arg(music_level_->value()));
+    music_duck_label_->setText(QStringLiteral("%1 dB").arg(music_duck_->value()));
+    music_fade_in_->setValue(p.music_bed.fade_in_s);
+    music_fade_out_->setValue(p.music_bed.fade_out_s);
+    music_offset_->setValue(p.music_bed.offset_s);
+    music_tail_->setValue(p.music_bed.tail_s);
+    music_loop_->setChecked(p.music_bed.loop);
+    loading_params_ = false;
+    refresh_music();
 }
 
 void MasterPage::sync_params() {
+    if (loading_params_) return;
     // Start from the live parameters so the targets set on the standards page
     // survive, then overwrite the chain switches this page owns.
     sanity::Params p = AppState::get().session().params;
@@ -382,6 +480,14 @@ void MasterPage::sync_params() {
     p.compress = compress_->isChecked();
     p.normalize = normalize_->isChecked();
     p.filler = static_cast<sanity::FillerMode>(filler_->currentData().toInt());
+    p.music_bed.enabled = music_enabled_->isChecked();
+    p.music_bed.bed_level_db = music_level_->value();
+    p.music_bed.duck_db = music_duck_->value();
+    p.music_bed.fade_in_s = music_fade_in_->value();
+    p.music_bed.fade_out_s = music_fade_out_->value();
+    p.music_bed.offset_s = music_offset_->value();
+    p.music_bed.tail_s = music_tail_->value();
+    p.music_bed.loop = music_loop_->isChecked();
     // Keep the standards page targets.
     AppState::get().set_params(p);
 }
@@ -393,6 +499,7 @@ void MasterPage::process() {
 }
 
 void MasterPage::refresh_from_state() {
+    refresh_music();
     const Session& s = AppState::get().session();
     if (s.has_audio) {
         wave_->set_samples(sanity::to_mono(s.audio), s.audio.sample_rate);
@@ -449,7 +556,17 @@ void MasterPage::show_report() {
     build_waveform();
 
     for (const std::string& w : r.warnings) verdict_->setText(verdict_->text() + "\n" +
-                                                              QString::fromStdString(w));
+                                                               QString::fromStdString(w));
+    for (const auto& stage : r.stages) {
+        if (stage.name != "music_bed" || !stage.enabled) continue;
+        auto metric = [&stage](const char* key) {
+            for (const auto& value : stage.metrics) if (value.first == key) return value.second;
+            return 0.0;
+        };
+        verdict_->setText(verdict_->text() + QStringLiteral("\nSottofondo: livello %1 dB nelle pause, ducking su %2 % del tempo, coda %3 s.")
+            .arg(metric("bed_level_db"), 0, 'f', 1).arg(metric("duck_ratio") * 100, 0, 'f', 0)
+            .arg(metric("tail_s"), 0, 'f', 1));
+    }
 }
 
 void MasterPage::build_stage_table() {
@@ -501,7 +618,6 @@ void MasterPage::show_candidates() {
 }
 
 void MasterPage::play(const QString& which) {
-#if SANITY_HAVE_QTMM
     const Session& s = AppState::get().session();
     const sanity::AudioBuffer& b = which == "after" ? s.mastered : s.audio;
     if (b.data.empty()) return;
@@ -509,23 +625,105 @@ void MasterPage::play(const QString& which) {
     const QString path = dir + QStringLiteral("/sanity-preview-%1.wav").arg(which);
     std::string err;
     if (!sanity::wav_write(path.toStdString(), b, true, &err)) return;
-    static QMediaPlayer* player = nullptr;
-    static QAudioOutput* audio = nullptr;
-    if (!player) {
-        player = new QMediaPlayer(this);
-        audio = new QAudioOutput(this);
-        player->setAudioOutput(audio);
-        audio->setVolume(0.8);
+    play_file(path);
+}
+
+void MasterPage::play_file(const QString& path) {
+#if SANITY_HAVE_QTMM
+    if (!player_) {
+        player_ = new QMediaPlayer(this);
+        auto* audio = new QAudioOutput(this);
+        player_->setAudioOutput(audio);
+        audio->setVolume(0.8f);
     }
-    player->setSource(QUrl::fromLocalFile(path));
-    player->play();
-    AppState::get().status_message(QStringLiteral("Riproduzione %1")
-                                       .arg(which == "after" ? QStringLiteral("del master")
-                                                             : QStringLiteral("dell'originale")));
+    player_->setSource(QUrl::fromLocalFile(path));
+    player_->play();
+    AppState::get().status_message(QStringLiteral("Riproduzione: %1").arg(QFileInfo(path).fileName()));
 #else
-    (void)which;
+    (void)path;
     AppState::get().status_message(QStringLiteral("Riproduzione non disponibile in questa build"));
 #endif
+}
+
+void MasterPage::stop_playback() {
+    ++preview_generation_;
+#if SANITY_HAVE_QTMM
+    if (player_) player_->stop();
+#endif
+    refresh_music();
+}
+
+void MasterPage::refresh_music() {
+    const Session& s = AppState::get().session();
+    music_info_->setText(s.has_music ? s.music_path + "\n" + describe_audio(*s.music)
+                                    : QStringLiteral("Nessuna musica caricata."));
+    const bool active = s.has_music && s.params.music_bed.enabled;
+    music_card_->set_state(active ? State::Ready : State::Idle,
+                          active ? QStringLiteral("Attivo") : QStringLiteral("Disattivato"));
+    music_preview_->setEnabled(!music_thread_ && s.has_music && s.has_audio);
+}
+
+void MasterPage::preview_music() {
+    const Session& s = AppState::get().session();
+    if (!s.has_audio || !s.has_music) {
+        AppState::get().status_message(QStringLiteral("Carica un audio e una musica per l'anteprima"));
+        return;
+    }
+    if (music_thread_) return;
+    sync_params();
+    const sanity::Params p = s.params;
+    std::vector<float> mono = sanity::to_mono(s.audio);
+    const int fs = s.audio.sample_rate;
+    if (fs <= 0 || mono.empty()) return;
+    sanity::Segmenter seg(sanity::SegmenterConfig{fs, 10.0, 35.0});
+    std::vector<sanity::FrameFeat> feats;
+    seg.features(mono, feats);
+    std::size_t first = 0;
+    for (std::size_t f = 0; f < feats.size(); f++) if (feats[f].speech) { first = f; break; }
+    const std::size_t hop = static_cast<std::size_t>(sanity::segmenter_hop(fs));
+    const std::size_t start = first > 100 ? (first - 100) * hop : 0;
+    const std::size_t len = std::min(mono.size() - start, static_cast<std::size_t>(15) * fs);
+    std::vector<float> excerpt(mono.begin() + static_cast<long>(start), mono.begin() + static_cast<long>(start + len));
+    std::vector<sanity::FrameFeat> ef(feats.begin() + static_cast<long>(start / hop),
+                                      feats.begin() + static_cast<long>(std::min(feats.size(), (start + len) / hop)));
+    auto music = s.music;
+    const int generation = ++preview_generation_;
+    music_preview_->setEnabled(false);
+    music_card_->set_state(State::Busy, QStringLiteral("Anteprima"));
+    auto* worker = QThread::create([this, excerpt, ef, music, p, fs, generation]() mutable {
+        QString path;
+        std::string err;
+        bool ok = false;
+        try {
+            sanity::MusicBedOptions o = p.music_bed;
+            o.enabled = true;
+            o.tail_s = std::min(o.tail_s, 3.0);
+            sanity::mix_music_bed(excerpt, fs, ef, *music, o);
+            sanity::normalize_loudness(excerpt, fs, -19.0, -1.0);
+            path = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                .filePath(QStringLiteral("sanity-preview-bed.wav"));
+            ok = sanity::wav_write(path.toStdString(), sanity::from_mono(fs, excerpt), true, &err);
+        } catch (const std::exception& e) {
+            err = e.what();
+        } catch (...) {
+            err = "Preview failed";
+        }
+        QMetaObject::invokeMethod(this, [this, ok, path, err, generation] {
+            if (generation != preview_generation_) return;
+            music_card_->set_state(ok ? State::Ready : State::Error,
+                ok ? QStringLiteral("In riproduzione") : QStringLiteral("Errore"));
+            if (ok) play_file(path);
+            else AppState::get().status_message(QString::fromStdString(err));
+        }, Qt::QueuedConnection);
+    });
+    music_thread_ = worker;
+    worker->setParent(this);
+    connect(worker, &QThread::finished, this, [this] {
+        music_thread_ = nullptr;
+        music_preview_->setEnabled(AppState::get().session().has_music && AppState::get().session().has_audio);
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
 }
 
 }  // namespace gui

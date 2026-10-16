@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QScrollArea>
 #include <QStandardPaths>
 #include <QStyleFactory>
 #include <QTimer>
@@ -83,7 +84,22 @@ private:
             b.data = item.degraded;
             st.set_audio(b, QString(), QStringLiteral("corpus"));
         }
-        st.start_mastering(st.session().params);
+        if (!st.session().has_music) {
+            auto music = std::make_shared<sanity::AudioBuffer>(sanity::AudioBuffer::zeros(44100, 2, 44100 * 3));
+            for (std::size_t i = 0; i < music->frames(); i++) {
+                const double t = static_cast<double>(i) / 44100;
+                const float v = static_cast<float>(0.2 * (std::sin(sanity::kTwoPi * 220 * t) +
+                    0.6 * std::sin(sanity::kTwoPi * 330 * t) + 0.4 * std::sin(sanity::kTwoPi * 440 * t)));
+                music->data[2 * i] = v;
+                music->data[2 * i + 1] = v;
+            }
+            st.set_music_buffer(music, QStringLiteral("Accordo di prova"));
+        }
+        sanity::Params p = st.session().params;
+        p.music_bed.enabled = true;
+        p.music_bed.tail_s = 1.0;
+        st.set_params(p);
+        st.start_mastering(p);
     }
 
     void verify(bool ok, const QString& err) {
@@ -92,6 +108,13 @@ private:
             std::exit(3);
         }
         const sanity::Report& r = gui::AppState::get().session().report;
+        bool bed_staged = false;
+        for (const auto& stage : r.stages)
+            if (stage.name == "music_bed" && stage.enabled) bed_staged = true;
+        if (!bed_staged) {
+            std::fprintf(stderr, "selftest: music bed stage missing\n");
+            std::exit(7);
+        }
         std::printf("selftest: lufs=%.2f tp=%.2f conformant=%s fillers=%zu stages=%zu rtf=%.3f\n",
                     r.after.integrated_lufs, r.after.true_peak_db, r.conformant ? "yes" : "no",
                     r.fillers_removed, r.stages.size(), r.rtf);
@@ -142,13 +165,13 @@ private:
     // The page list is static so the deferred callbacks never hold a pointer to
     // a stack array that has already gone out of scope.
     static const int* after_pages() {
-        static const int pages[] = {2, 4, 6};
+        static const int pages[] = {1, 2, 4, 6};
         return pages;
     }
 
     void capture_after(int i) {
         const int* pages = after_pages();
-        if (i >= 3) {
+        if (i >= 4) {
             std::printf("selftest: OK\n");
             std::fflush(stdout);
             QApplication::quit();
@@ -156,6 +179,15 @@ private:
         }
         const int page = pages[i];
         window_->select_page(page);
+        if (page == 1) {
+            auto* card = window_->findChild<QWidget*>(QStringLiteral("MusicBedCard"));
+            for (QWidget* parent = card ? card->parentWidget() : nullptr; parent; parent = parent->parentWidget()) {
+                if (auto* scroll = qobject_cast<QScrollArea*>(parent)) {
+                    scroll->ensureWidgetVisible(card);
+                    break;
+                }
+            }
+        }
         QTimer::singleShot(320, [this, i, page] {
             grab(page, QStringLiteral("mastered"));
             capture_after(i + 1);

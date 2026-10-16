@@ -25,6 +25,7 @@ class QThread;
 class QTimer;
 class QVBoxLayout;
 class QScrollArea;
+class QMediaPlayer;
 
 namespace gui {
 
@@ -123,6 +124,7 @@ class MasterPage : public QWidget {
     Q_OBJECT
 public:
     explicit MasterPage(QWidget* parent = nullptr);
+    ~MasterPage() override;
     void load_params(const sanity::Params& p);
 
 private:
@@ -133,11 +135,34 @@ private:
     void build_stage_table();
     void build_waveform();
     void play(const QString& which);
+    void play_file(const QString& path);
+    void stop_playback();
+    void preview_music();
+    void refresh_music();
     void refresh_from_state();
 
     Card* audio_card_ = nullptr;
     Card* chain_card_ = nullptr;
     Card* filler_card_ = nullptr;
+    Card* music_card_ = nullptr;
+    QPushButton* music_pick_ = nullptr;
+    QLabel* music_info_ = nullptr;
+    QCheckBox* music_enabled_ = nullptr;
+    QSlider* music_level_ = nullptr;
+    QLabel* music_level_label_ = nullptr;
+    QSlider* music_duck_ = nullptr;
+    QLabel* music_duck_label_ = nullptr;
+    QDoubleSpinBox* music_fade_in_ = nullptr;
+    QDoubleSpinBox* music_fade_out_ = nullptr;
+    QDoubleSpinBox* music_offset_ = nullptr;
+    QDoubleSpinBox* music_tail_ = nullptr;
+    QCheckBox* music_loop_ = nullptr;
+    QPushButton* music_preview_ = nullptr;
+    QPushButton* music_preview_stop_ = nullptr;
+    QThread* music_thread_ = nullptr;
+    QMediaPlayer* player_ = nullptr;
+    bool loading_params_ = true;
+    int preview_generation_ = 0;
     Card* result_card_ = nullptr;
     Card* stages_card_ = nullptr;
 

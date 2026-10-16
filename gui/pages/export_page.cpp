@@ -259,7 +259,8 @@ bool ExportPage::master_is_stale() const {
                             s.report.params.out_sample_rate != want_rate ||
                             s.report.params.target_lufs != s.params.target_lufs ||
                             s.report.params.target_true_peak_db != s.params.target_true_peak_db ||
-                            s.report.params.normalize != s.params.normalize);
+                            s.report.params.normalize != s.params.normalize ||
+                            s.report.params_hash != sanity::params_hash(s.params, s.music.get()));
 }
 
 void ExportPage::refresh() {
