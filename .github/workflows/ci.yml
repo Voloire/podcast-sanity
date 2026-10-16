@@ -108,7 +108,7 @@ jobs:
 
       - name: Install MSI and test isolated payload
         shell: pwsh
-        run: ./packaging/test-windows-msi.ps1 -Msi (Get-ChildItem build/*.msi | Select-Object -First 1).FullName
+        run: ./packaging/test-windows-msi.ps1 -Msi (Get-ChildItem build/*.msi | Select-Object -First 1).FullName -Uninstall
 
       - uses: actions/upload-artifact@v4
         with:

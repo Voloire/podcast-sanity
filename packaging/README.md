@@ -61,7 +61,7 @@ Build, test and package from PowerShell:
   -Generator 'Visual Studio 17 2022'
 ```
 
-Artifacts: `build-windows\packages\podcast-sanity-0.1.0-win64.msi` and `.zip`.
+Artifacts: `build-windows\packages\podcast-sanity-0.2.0-win64.msi` and `.zip`.
 The release script requires all codecs and stops on a failed build or test.
 `windeployqt` runs on both build output and the CPack install tree. The package
 includes the Windows platform/audio plugins, codecs, transitive DLLs, Visual C++
@@ -73,7 +73,7 @@ environment (this leaves the application installed):
 
 ```powershell
 .\packaging\test-windows-msi.ps1 `
-  -Msi .\build-windows\packages\podcast-sanity-0.1.0-win64.msi
+  -Msi .\build-windows\packages\podcast-sanity-0.2.0-win64.msi
 ```
 
 This checks installation, CLI startup, all seven GUI pages, mastering and MP3
@@ -84,6 +84,35 @@ selftest uses synthetic audio and does not record the microphone.
 Keep `CPACK_WIX_UPGRADE_GUID` stable for future upgrades. The current build is
 unsigned. `data/podcast-sanity.ico` is checked in; `generate-icon.py` is only an
 optional artwork regeneration tool.
+
+The Studio-branded installer offers a checked **Launch Podcast Sanity** option
+on the finish page. The payload excludes the software OpenGL renderer and TLS,
+network-information, generic and QML-tooling plugins. Qt Network remains a
+Multimedia dependency; no network service is used by the application.
+
+For upgrade and uninstall verification, preserve the original 0.1.0 installer:
+
+```powershell
+.\packaging\test-windows-msi.ps1 `
+  -Msi .\build-windows\packages\podcast-sanity-0.2.0-win64.msi `
+  -PreviousMsi .\build-windows\packages-0.1.0\podcast-sanity-0.1.0-win64.msi -Uninstall
+```
+
+Start without an installed newer version when using `-PreviousMsi`. The test
+checks one Apps & features entry at 0.2.0 and one current-user MSI registration,
+then checks runtime removal when `-Uninstall` is supplied. Windows may expose
+the uninstall entry under HKLM even with the user product registered in HKCU;
+the test checks both uninstall roots.
+
+Signing requires an owner-provided certificate in the Windows certificate store:
+`build-windows.ps1 -SignThumbprint <certificate-thumbprint>` signs both executables
+before packaging and the MSI afterwards. `-TimestampUrl` overrides the default
+RFC 3161 timestamp service. Without a thumbprint the build stays unsigned; signing
+and timestamping were not exercised in the offline release verification.
+
+Accepted WiX ICE warnings: ICE61 allows same-version reinstalls, ICE69 reflects
+CPack's shortcut component layout, and ICE90/ICE91 reflect per-user directories.
+Other validation diagnostics remain enabled.
 
 ## Codec availability
 
