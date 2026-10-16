@@ -21,6 +21,7 @@ class QSpinBox;
 class QDoubleSpinBox;
 class QSlider;
 class QTableWidget;
+class QThread;
 class QTimer;
 class QVBoxLayout;
 class QScrollArea;
@@ -157,6 +158,7 @@ private:
     QCheckBox* normalize_ = nullptr;
 
     QPushButton* process_ = nullptr;
+    QPushButton* cancel_ = nullptr;
     QPushButton* candidates_btn_ = nullptr;
     QPushButton* play_before_ = nullptr;
     QPushButton* play_after_ = nullptr;
@@ -246,6 +248,8 @@ private:
     void copy_rss();
     void open_spotify();
     sanity::ExportOptions options() const;
+    // True when a master exists but was rendered with other delivery settings.
+    bool master_is_stale() const;
 
     Card* format_card_ = nullptr;
     Card* conform_card_ = nullptr;
@@ -307,6 +311,7 @@ class DiagnosticsPage : public QWidget {
     Q_OBJECT
 public:
     explicit DiagnosticsPage(QWidget* parent = nullptr);
+    ~DiagnosticsPage() override;
 
 private:
     void run_harness();
@@ -333,6 +338,7 @@ private:
     QPushButton* save_ = nullptr;
     QLabel* status_ = nullptr;
     QComboBox* seconds_ = nullptr;
+    QThread* harness_thread_ = nullptr;
     bool running_ = false;
     QString last_json_;
 };

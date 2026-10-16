@@ -106,6 +106,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             });
     connect(&AppState::get(), &AppState::library_changed, this,
             [this] { status_->setText(QStringLiteral("Libreria aggiornata")); });
+    connect(&AppState::get(), &AppState::theme_changed, this, &MainWindow::apply_theme);
 
     select_page(0);
     apply_theme();

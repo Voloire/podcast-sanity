@@ -253,12 +253,21 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
         progress_ = new QProgressBar();
         progress_->setRange(0, 0);
         progress_->hide();
+        cancel_ = new QPushButton(QStringLiteral("Annulla"));
+        cancel_->setObjectName("Ghost");
+        cancel_->hide();
+        connect(cancel_, &QPushButton::clicked, this, [] { AppState::get().cancel_mastering(); });
+        auto* progress_row = new QWidget();
+        auto* progress_hl = new QHBoxLayout(progress_row);
+        progress_hl->setContentsMargins(0, 0, 0, 0);
+        progress_hl->addWidget(progress_, 1);
+        progress_hl->addWidget(cancel_);
         elapsed_ = new QLabel(QStringLiteral(""));
         elapsed_->setObjectName("Hint");
         process_ = new QPushButton(QStringLiteral("Elabora con Sanity Master"));
         process_->setObjectName("Primary");
         connect(process_, &QPushButton::clicked, this, &MasterPage::process);
-        result_card_->add_widget(progress_);
+        result_card_->add_widget(progress_row);
         result_card_->add_widget(make_row(QStringLiteral("Stato"), elapsed_));
         result_card_->add_widget(process_);
 
@@ -297,6 +306,7 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
         processing_ = true;
         since_start_.start();
         progress_->show();
+        cancel_->show();
         process_->setEnabled(false);
         result_card_->set_state(State::Busy, QStringLiteral("Elaborazione"));
         if (!elapsed_timer_) {
@@ -313,9 +323,15 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     connect(&AppState::get(), &AppState::mastering_finished, this, [this](bool ok, const QString& err) {
         processing_ = false;
         progress_->hide();
+        cancel_->hide();
         if (elapsed_timer_) elapsed_timer_->stop();
         process_->setEnabled(true);
         if (!ok) {
+            if (err == QStringLiteral("Annullato")) {
+                result_card_->set_state(State::Idle, QStringLiteral("Annullato"));
+                verdict_->setText(QStringLiteral("Elaborazione annullata."));
+                return;
+            }
             result_card_->set_state(State::Error, QStringLiteral("Errore"));
             verdict_->setText(err);
             return;

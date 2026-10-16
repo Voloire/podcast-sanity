@@ -99,6 +99,8 @@ private:
     QString library_dir_;
     bool busy_ = false;
     double last_elapsed_ms_ = 0.0;
+    int job_id_ = 0;
+    int cancelled_job_ = -1;
 
     class Worker;
     Worker* worker_ = nullptr;

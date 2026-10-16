@@ -138,7 +138,7 @@ void SettingsPage::apply_theme() {
     QSettings st;
     st.setValue("ui/theme", theme_->currentIndex());
     set_mode(theme_->currentIndex() == 1 ? ThemeMode::Dark : ThemeMode::Light);
-    AppState::get().theme_changed();
+    emit AppState::get().theme_changed();
     AppState::get().status_message(QStringLiteral("Tema aggiornato"));
 }
 

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 
 #include "sanity/loudness.hpp"
 #include "theme.h"
@@ -82,16 +83,24 @@ QString analysis_line(const sanity::Analysis& a) {
 class AppState::Worker : public QObject {
     Q_OBJECT
 public slots:
-    void run_job(sanity::AudioBuffer in, sanity::Params p) {
-        QElapsedTimer t;
-        t.start();
-        sanity::AudioBuffer out;
-        const sanity::Report rep = sanity::master(in, p, out);
-        emit finished(true, rep, out, QString());
+    void run_job(sanity::AudioBuffer in, sanity::Params p, int job) {
+        try {
+            sanity::AudioBuffer out;
+            const sanity::Report rep = sanity::master(in, p, out);
+            emit finished(true, rep, out, QString(), job);
+        } catch (const std::exception& e) {
+            emit finished(false, sanity::Report{}, sanity::AudioBuffer{},
+                          QStringLiteral("Errore interno durante l'elaborazione: %1")
+                              .arg(QString::fromUtf8(e.what())),
+                          job);
+        } catch (...) {
+            emit finished(false, sanity::Report{}, sanity::AudioBuffer{},
+                          QStringLiteral("Errore interno durante l'elaborazione"), job);
+        }
     }
 
 signals:
-    void finished(bool ok, sanity::Report rep, sanity::AudioBuffer out, QString error);
+    void finished(bool ok, sanity::Report rep, sanity::AudioBuffer out, QString error, int job);
 };
 
 // ------------------------------------------------------------------ AppState
@@ -109,7 +118,12 @@ AppState::AppState(QObject* parent) : QObject(parent) {
     worker_->moveToThread(&worker_thread_);
     connect(&worker_thread_, &QThread::finished, worker_, &QObject::deleteLater);
     connect(worker_, &Worker::finished, this, [this](bool ok, sanity::Report rep,
-                                                     sanity::AudioBuffer out, QString error) {
+                                                     sanity::AudioBuffer out, QString error,
+                                                     int job) {
+        if (job == cancelled_job_) {
+            emit status_message(QStringLiteral("Elaborazione annullata"));
+            return;
+        }
         busy_ = false;
         if (ok) {
             set_mastered(out, rep);
@@ -215,18 +229,22 @@ void AppState::start_mastering(const sanity::Params& p) {
         return;
     }
     busy_ = true;
+    job_id_++;
     session_.params = p;
     emit mastering_started();
     emit status_message(QStringLiteral("Elaborazione in corso..."));
     QMetaObject::invokeMethod(worker_, "run_job", Qt::QueuedConnection,
                               Q_ARG(sanity::AudioBuffer, session_.audio),
-                              Q_ARG(sanity::Params, p));
+                              Q_ARG(sanity::Params, p),
+                              Q_ARG(int, job_id_));
 }
 
 void AppState::cancel_mastering() {
     // The pipeline is not interruptible mid stage; cancellation only prevents
     // the result from being adopted.
+    cancelled_job_ = job_id_;
     busy_ = false;
+    emit mastering_finished(false, QStringLiteral("Annullato"));
 }
 
 // ------------------------------------------------------------------- library

@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -67,6 +68,29 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent) {
             if (!sanity::encoder_available(f.format)) continue;
             format_->addItem(QString::fromUtf8(f.label),
                              QVariantList{f.bitrate, static_cast<int>(f.format)});
+        }
+        // Restore the default delivery format chosen in Settings, whose combo
+        // indices are 0 MP3 96, 1 MP3 192, 2 WAV 24, 3 FLAC.
+        {
+            const int saved = QSettings().value("export/format", 0).toInt();
+            sanity::ExportFormat want_format = sanity::ExportFormat::Mp3;
+            int want_bitrate = 96;
+            if (saved == 1) {
+                want_format = sanity::ExportFormat::Mp3;
+                want_bitrate = 192;
+            } else if (saved == 2) {
+                want_format = sanity::ExportFormat::Wav24;
+                want_bitrate = 0;
+            } else if (saved == 3) {
+                want_format = sanity::ExportFormat::Flac;
+                want_bitrate = 0;
+            }
+            for (int i = 0; i < format_->count(); i++) {
+                const QVariantList v = format_->itemData(i).toList();
+                if (v.size() == 2 && v.at(0).toInt() == want_bitrate &&
+                    v.at(1).toInt() == static_cast<int>(want_format))
+                    format_->setCurrentIndex(i);
+            }
         }
         connect(format_, &QComboBox::currentIndexChanged, this, [this] { refresh(); });
         format_card_->add_widget(make_row(QStringLiteral("Formato"), format_));
@@ -188,6 +212,14 @@ sanity::ExportOptions ExportPage::options() const {
     return o;
 }
 
+bool ExportPage::master_is_stale() const {
+    const Session& s = AppState::get().session();
+    const int want_ch = channels_->currentData().toInt();
+    const int want_rate = rate_->currentData().toInt();
+    return s.has_report && (s.report.params.out_channels != want_ch ||
+                            s.report.params.out_sample_rate != want_rate);
+}
+
 void ExportPage::refresh() {
     const Session& s = AppState::get().session();
     const sanity::ExportOptions o = options();
@@ -235,6 +267,11 @@ void ExportPage::refresh() {
     }
     if (!sanity::encoder_available(o.format))
         hint = QStringLiteral("Codificatore non disponibile in questa build.");
+    if (master_is_stale())
+        hint += QStringLiteral(" Il master in memoria e a %1 canali / %2 Hz: esportando verra "
+                               "rielaborato.")
+                    .arg(s.report.params.out_channels)
+                    .arg(s.report.params.out_sample_rate);
     hint_->setText(hint);
 
     const QString name = filename_->text().trimmed().isEmpty()
@@ -252,15 +289,19 @@ void ExportPage::refresh() {
 
 void ExportPage::do_export() {
     Session& s = AppState::get().session();
-    if (!s.has_report) {
+    const int want_ch = channels_->currentData().toInt();
+    const int want_rate = rate_->currentData().toInt();
+    const bool stale = s.has_report && (s.report.params.out_channels != want_ch ||
+                                        s.report.params.out_sample_rate != want_rate);
+    if (!s.has_report || stale) {
         if (!s.has_audio) {
             QMessageBox::information(this, QStringLiteral("Esporta"),
                                      QStringLiteral("Carica o registra prima un audio."));
             return;
         }
         sanity::Params p = s.params;
-        p.out_channels = channels_->currentData().toInt();
-        p.out_sample_rate = rate_->currentData().toInt();
+        p.out_channels = want_ch;
+        p.out_sample_rate = want_rate;
         s.params = p;
         export_after_ = true;
         export_->setEnabled(false);
