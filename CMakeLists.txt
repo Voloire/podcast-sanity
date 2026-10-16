@@ -215,6 +215,12 @@ include(GNUInstallDirs)
 install(TARGETS podcast-sanity-render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+# Desktop integration is a freedesktop concept. Installing it on Windows would
+# drop .desktop files and AppStream metadata into the MSI, which nothing there
+# can read.
+if(UNIX)
   install(FILES data/podcast-sanity.desktop
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES data/io.github.voloire.podcast-sanity.metainfo.xml
@@ -222,6 +228,26 @@ if(TARGET podcast-sanity)
   install(FILES data/podcast-sanity.svg
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
           RENAME podcast-sanity.svg)
+endif()
+
+# The codec libraries come from vcpkg as DLLs on Windows, so the package must
+# carry their runtime. They are collected wholesale rather than one by one
+# because libsndfile pulls in a dozen transitive dependencies of its own.
+if(WIN32)
+  set(SANITY_VCPKG_BIN "")
+  if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+    set(SANITY_VCPKG_BIN "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+  elseif(DEFINED ENV{VCPKG_INSTALLATION_ROOT} AND VCPKG_TARGET_TRIPLET)
+    set(SANITY_VCPKG_BIN "$ENV{VCPKG_INSTALLATION_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin")
+  endif()
+  if(SANITY_VCPKG_BIN AND EXISTS "${SANITY_VCPKG_BIN}")
+    file(GLOB SANITY_CODEC_RUNTIME "${SANITY_VCPKG_BIN}/*.dll")
+    list(LENGTH SANITY_CODEC_RUNTIME SANITY_CODEC_RUNTIME_COUNT)
+    if(SANITY_CODEC_RUNTIME_COUNT GREATER 0)
+      install(FILES ${SANITY_CODEC_RUNTIME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+      message(STATUS "Shipping ${SANITY_CODEC_RUNTIME_COUNT} codec DLL(s) from ${SANITY_VCPKG_BIN}")
+    endif()
+  endif()
 endif()
 
 # ---- packaging -----------------------------------------------------------
@@ -233,6 +259,9 @@ set(CPACK_PACKAGE_CONTACT "Voloire <dev@voloire.local>")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/voloire/podcast-sanity")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
+# Without this the WiX default is "<name> <version>", which puts every release
+# in its own "podcast-sanity 0.1.0" folder under Program Files.
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "podcast-sanity")
 
 # --- Debian / Ubuntu -------------------------------------------------------
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Voloire")
