@@ -404,44 +404,71 @@ void WaveformView::paintEvent(QPaintEvent*) {
     p.setPen(QPen(t.border, 1));
     p.drawPath(bg);
 
+    // Studio grid: dB lines at -6, -12, -24 and a time ruler.
+    const QRectF plot = r.adjusted(48, 0, -4, -16);
+    const double mid = plot.center().y();
+    const double scale = plot.height() * 0.46;
+    p.setPen(QPen(t.border, 1, Qt::DotLine));
+    for (double db : {-6.0, -12.0, -24.0}) {
+        const double a = std::pow(10.0, db / 20.0) * scale;
+        p.drawLine(QPointF(plot.left(), mid - a), QPointF(plot.right(), mid - a));
+        p.drawLine(QPointF(plot.left(), mid + a), QPointF(plot.right(), mid + a));
+        p.setPen(QPen(t.text_faint, 1));
+        p.drawText(QRectF(r.left() + 4, mid - a - 7, 40, 14), Qt::AlignLeft | Qt::AlignVCenter,
+                   QStringLiteral("%1 dB").arg(db));
+        p.setPen(QPen(t.border, 1, Qt::DotLine));
+    }
+    if (duration_s_ > 0.0) {
+        const double step = duration_s_ > 600 ? 60 : (duration_s_ > 120 ? 30 : (duration_s_ > 30 ? 10 : 5));
+        p.setPen(QPen(t.text_faint, 1));
+        for (double s = 0.0; s <= duration_s_; s += step) {
+            const double x = plot.left() + (s / duration_s_) * plot.width();
+            p.drawLine(QPointF(x, plot.bottom()), QPointF(x, plot.bottom() + 4));
+            const double label_x = std::clamp(x - 24, r.left(), std::max(r.left(), r.right() - 48));
+            p.drawText(QRectF(label_x, plot.bottom() + 3, 48, 13), Qt::AlignHCenter | Qt::AlignTop,
+                       fmt_seconds(s));
+        }
+    }
+
     // Filler / marker overlays first, so the waveform sits on top.
     if (!markers_.isEmpty() && duration_s_ > 0.0) {
         p.setPen(Qt::NoPen);
         QColor overlay = t.accent;
         overlay.setAlpha(70);
         for (const auto& m : markers_) {
-            const double x0 = r.left() + (m.first / duration_s_) * r.width();
-            const double x1 = r.left() + (m.second / duration_s_) * r.width();
-            p.fillRect(QRectF(x0, r.top(), std::max(1.0, x1 - x0), r.height()), overlay);
+            const double x0 = plot.left() + (m.first / duration_s_) * plot.width();
+            const double x1 = plot.left() + (m.second / duration_s_) * plot.width();
+            p.fillRect(QRectF(x0, plot.top(), std::max(1.0, x1 - x0), plot.height()), overlay);
         }
     }
 
     if (buckets_ > 0 && !mono_.empty()) {
-        const double mid = r.center().y();
-        const double scale = r.height() * 0.46;
         p.setPen(QPen(t.border, 1));
-        p.drawLine(QPointF(r.left(), mid), QPointF(r.right(), mid));
-        p.setPen(QPen(t.accent, 1));
-        for (int b = 0; b < buckets_; b++) {
-            const double x = r.left() + (static_cast<double>(b) + 0.5) / buckets_ * r.width();
-            const double y0 = mid - env_max_[b] * scale;
-            const double y1 = mid - env_min_[b] * scale;
-            p.drawLine(QPointF(x, y0), QPointF(x, std::max(y1, y0 + 0.6)));
+        p.drawLine(QPointF(plot.left(), mid), QPointF(plot.right(), mid));
+        for (int pass = 0; pass < 2; pass++) {
+            p.setPen(QPen(pass == 0 ? t.accent_soft : t.accent, 1));
+            const double amplitude = scale * (pass == 0 ? 1.15 : 1.0);
+            for (int b = 0; b < buckets_; b++) {
+                const double x = plot.left() + (static_cast<double>(b) + 0.5) / buckets_ * plot.width();
+                const double y0 = mid - env_max_[b] * amplitude;
+                const double y1 = mid - env_min_[b] * amplitude;
+                p.drawLine(QPointF(x, y0), QPointF(x, std::max(y1, y0 + 0.6)));
+            }
         }
     } else {
         p.setPen(t.text_faint);
-        p.drawText(r, Qt::AlignCenter, QStringLiteral("Nessun audio caricato"));
+        p.drawText(plot, Qt::AlignCenter, QStringLiteral("Nessun audio caricato"));
     }
 
     if (show_playhead_ && playhead_ >= 0.0 && duration_s_ > 0.0) {
-        const double x = r.left() + (playhead_ / duration_s_) * r.width();
+        const double x = plot.left() + (playhead_ / duration_s_) * plot.width();
         p.setPen(QPen(t.text, 1));
-        p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
     }
 
     if (!marker_label_.isEmpty() && !markers_.isEmpty()) {
         p.setPen(t.text_dim);
-        p.drawText(r.adjusted(8, 6, -8, 0), Qt::AlignTop | Qt::AlignLeft, marker_label_);
+        p.drawText(plot.adjusted(8, 6, -8, 0), Qt::AlignTop | Qt::AlignLeft, marker_label_);
     }
 }
 
