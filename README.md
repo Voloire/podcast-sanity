@@ -109,14 +109,16 @@ The renderer exits **3** when the result is not conformant.
 
 * **11/11 Windows CTest tests pass**: unit, four CLI checks, four end-to-end
   configurations, GUI and GUI screenshots.
-* 36 unit cases / 1342 checks over the DSP primitives (without the libebur128
-  cross-check, which the Windows build does not link).
+* 36 unit cases / 1342 checks over the DSP primitives without the libebur128
+  cross-check (39 cases / 1353 checks when it is linked, as on Linux).
 * A 12-case / 66-check end-to-end harness (63 checks at 44.1 kHz) that generates synthetic episodes with
   ground truth, masters them and judges loudness, true peak, filler precision and
   recall, SNR, SI-SDR, determinism and report completeness.
 * A GUI self test that walks all seven pages, masters, exports an MP3 and checks
-  the report contract. Linux CI is configured for `xvfb`; release verification
-  on the owner's Debian workstation is pending.
+  the report contract. It passes on Linux under `xvfb` as well as on Windows.
+* Linux/Debian 9/9 CTest tests on Ubuntu 26.04, a `.deb` that upgrades an
+  existing 0.1.0 install, runs and removes cleanly, and an ffmpeg cross-check of
+  **-16.0 LUFS** on a stereo delivery.
 * Every run emits a JSON response with per-stage timings, real-time factor,
   a parameters hash and the conformance verdict.
 * MSI 0.1.0-to-0.2.0 upgrade, isolated installed-app test and uninstall verified.

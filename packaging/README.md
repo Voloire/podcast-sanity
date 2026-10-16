@@ -131,5 +131,23 @@ the final MSI size slightly. The original 0.1.0 MSI is preserved separately.
 
 Interactive installer appearance and Finish launch, microphone/preview controls
 and subjective listening still need owner verification. Signing was not run
-without a certificate. Linux packaging, sanitizers and libebur128 checks are
-deferred to the owner's real Debian workstation.
+without a certificate.
+
+## Debian verification (0.2.0)
+
+Performed on the owner's Ubuntu 26.04 workstation (GCC 15.2, Qt 6.10.2,
+CMake 4.2.3, libebur128 1.2.6):
+
+* release configure, build and `ctest`: **100% tests passed out of 9**;
+* `cpack -G DEB` produced `podcast-sanity_0.2.0_amd64.deb` (about 1.24 MB); the
+  installed payload ran the GUI self-test under `xvfb-run` and passed;
+* the `.deb` upgraded an existing 0.1.0 install to 0.2.0 and removed cleanly,
+  leaving no files behind;
+* `desktop-file-validate` and `appstreamcli validate` both pass;
+* the ffmpeg stereo cross-check reads **I: -16.0 LUFS**, matching Windows;
+* the ASan/UBSan build (GUI off) passes the unit and base end-to-end suites with
+  no sanitizer report.
+
+The Debian package installs the GPL text and the third-party notices under
+`/usr/share/doc/podcast-sanity/`, as Debian Policy §12.5 requires. Subjective
+listening, live recording and interactive preview remain pending.

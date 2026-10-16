@@ -9,7 +9,7 @@ cd build && ctest --output-on-failure
 
 | Suite | Target | Size | Time | What it protects |
 |-------|--------|------|------|------------------|
-| `unit` | `sanity_tests` | 36 cases / 1342 checks without libebur128 | ~33 s | DSP, codecs, reports and music bed |
+| `unit` | `sanity_tests` | 36 cases / 1342 checks without libebur128 (39 / 1353 with it) | ~33 s | DSP, codecs, reports and music bed |
 | `cli_missing_value`, `cli_help`, `cli_list_profiles` | renderer | argument/profile checks | <1 s | CLI contract |
 | `cli_music_bed` | PowerShell + renderer | generation, mix, report and tail | ~0.7 s | CLI bed switches (Windows) |
 | `e2e` | `sanity_e2e_tests` | 12 cases / 66 checks | ~9 s | Whole chain against ground truth |
@@ -20,10 +20,23 @@ cd build && ctest --output-on-failure
 | `gui_shots` | self-test with screenshots | Studio, Light and Dark captures | ~9 s | Windows visual evidence |
 
 Windows release verification: **100% tests passed out of 11** (about two minutes).
-Linux/Debian execution and libebur128 cross-checks are deferred to the owner's
-real workstation. Manual listening, recording/preview interaction and installer
-Finish behavior are pending because desktop control and audio listening were
-unavailable during this run.
+Linux/Debian release verification: **100% tests passed out of 9** on an Ubuntu
+26.04 workstation (unit, the four CLI checks, the four end-to-end runs and the
+GUI under `xvfb-run`). libebur128 is linked there, so the unit suite is
+39 cases / 1353 checks; the non-ebur128 count still matches Windows at
+36 cases / 1342 checks. The Debian machine is a 15 W ultrabook (i7-8550U), so the
+wall-clock is roughly six to ten times the Windows desktop numbers above; the
+900 s CTest timeout still covers the longest case (`e2e_45s`, ~211 s) with room to
+spare. Manual listening, recording/preview interaction and installer Finish
+behavior remain pending because desktop control and audio listening are still
+unavailable.
+
+An ASan/UBSan build (`SANITY_WITH_GUI=OFF`) passes the unit and base end-to-end
+suites with no sanitizer report. The instrumented build multiplies wall-clock
+about five times, so the `unit`, `e2e`, `e2e_44k` and `e2e_30s` runs fit their
+timeouts on this machine while `e2e_45s` reaches the 900 s CTest cap; the
+sanitizer CI job therefore runs `unit` and `e2e` only and leaves the 30 s / 45 s /
+44.1 kHz variants to the release job.
 
 ---
 

@@ -30,8 +30,14 @@
 - Ship a trimmed Windows runtime, branded MSI dialogs and launch checkbox,
   publisher metadata, signing hooks and automated upgrade/uninstall checks.
 - Windows: 11/11 CTest tests, 36 unit cases / 1342 checks and a 12-case harness.
-- Debian release verification, subjective listening, interactive recording/
-  preview/installer checks and certificate-based signing remain pending.
+- Debian: 9/9 CTest tests (39 unit cases / 1353 checks with libebur128), a .deb
+  that upgrades 0.1.0 to 0.2.0 and removes cleanly, a -16.0 LUFS ffmpeg
+  cross-check, and an ASan/UBSan build with no sanitizer report.
+- Report the project version consistently in the summary, the JSON report and
+  `--version`, and install the Debian copyright and third-party notices under
+  `/usr/share/doc/podcast-sanity`.
+- Subjective listening, interactive recording/preview/installer checks and
+  certificate-based signing remain pending.
 
 ## 0.1.0 — 2026-10-15
 - Initial local recording, mastering, acoustic filler removal, session library
