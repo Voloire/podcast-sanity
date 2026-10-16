@@ -57,10 +57,11 @@ setting the target explicitly. The GUI exposes these presets:
 | AES streaming | −16 LUFS | −1.0 dBTP | |
 | Custom | any | any | |
 
-Optional ceilings: `max_lra`, `max_short_term` and `max_momentary`. All three are
-**0 = unconstrained** by default; when set, exceeding them is reported as a
-conformance failure. A non-zero `max_short_term` or `max_momentary` turns on
-clause-by-clause enforcement in the pipeline.
+Optional ceilings: `max_short_term` and `max_momentary` are **enforced** by a slow
+gain reduction inside the normalisation stage and then **reported**; `max_lra` is
+**reported only** (a loudness range reduction would be a second leveler pass and
+is not part of the chain). All three are 0 = unconstrained; when set, exceeding
+them makes `conformance.ok` false with the reason in `warnings`.
 
 ---
 
@@ -87,11 +88,11 @@ no encoder is present rather than offering a button that cannot work.
 
 ## 4. What "conformant" means in the report
 
-`Report::conformance` carries three booleans, and the CLI exits 3 when the
+`Report::conformance` carries six booleans, and the CLI exits 3 when the
 overall verdict is false:
 
 ```json
-"conformance": { "loudness_ok": true, "true_peak_ok": true, "ok": true }
+"conformance": { "loudness_ok": true, "true_peak_ok": true, "lra_ok": true, "short_term_ok": true, "momentary_ok": true, "ok": true }
 ```
 
 * `loudness_ok` — the achieved integrated loudness is within tolerance of the

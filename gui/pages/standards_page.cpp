@@ -241,8 +241,7 @@ void StandardsPage::refresh_conformance() {
     peak_chip_->set_state(r.conformant_true_peak ? State::Ready : State::Error,
                           r.conformant_true_peak ? QStringLiteral("True peak OK")
                                                  : QStringLiteral("True peak alto"));
-    const bool lra_ok = p.max_lra <= 0.0 || r.after.lra <= p.max_lra;
-    lra_chip_->set_state(lra_ok ? State::Ready : State::Warning,
+    lra_chip_->set_state(r.conformant_lra ? State::Ready : State::Warning,
                          QStringLiteral("LRA %1 LU").arg(fmt_db(r.after.lra)));
     conform_card_->set_state(r.conformant ? State::Ready : State::Warning,
                              r.conformant ? QStringLiteral("Conforme")

@@ -196,6 +196,9 @@ std::string Report::to_json() const {
     j.begin_object();
     j.member("loudness_ok", conformant_loudness);
     j.member("true_peak_ok", conformant_true_peak);
+    j.member("lra_ok", conformant_lra);
+    j.member("short_term_ok", conformant_short_term);
+    j.member("momentary_ok", conformant_momentary);
     j.member("ok", conformant);
     j.end_object();
 
@@ -424,7 +427,21 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     else
         r.warnings.push_back("true peak above ceiling: " +
                              std::to_string(r.after.true_peak_db) + " dBTP");
-    r.conformant = r.conformant_loudness && r.conformant_true_peak;
+    if (p.max_lra > 0.0 && r.after.lra > p.max_lra) {
+        r.conformant_lra = false;
+        r.warnings.push_back("loudness range " + std::to_string(r.after.lra) + " LU exceeds the maximum " +
+                             std::to_string(p.max_lra) + " LU (reported, not corrected)");
+    }
+    if (p.max_short_term < 0.0 && r.after.max_short_term > p.max_short_term + 0.1) {
+        r.conformant_short_term = false;
+        r.warnings.push_back("short term loudness above the configured maximum");
+    }
+    if (p.max_momentary < 0.0 && r.after.max_momentary > p.max_momentary + 0.1) {
+        r.conformant_momentary = false;
+        r.warnings.push_back("momentary loudness above the configured maximum");
+    }
+    r.conformant = r.conformant_loudness && r.conformant_true_peak && r.conformant_lra &&
+                   r.conformant_short_term && r.conformant_momentary;
     if (in.channels > 1)
         r.warnings.push_back(
             "multichannel input was summed to mono for processing and mapped back to " +

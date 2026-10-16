@@ -14,6 +14,7 @@
 #include "sanity/dynamics.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
+#include "sanity/master.hpp"
 #include "tinytest.hpp"
 
 #if SANITY_HAVE_EBUR128
@@ -506,6 +507,34 @@ TT_CASE("a stereo file with one silent channel measures like the mono signal") {
     for (std::size_t i = 0; i < mono.size(); i++) b.data[2 * i] = mono[i];
     CHECK_NEAR(measure_loudness(b).integrated_lufs, measure_loudness(mono, fs).integrated_lufs, 0.05);
     CHECK_NEAR(measure_loudness(b).true_peak_db, true_peak_db(mono, fs), 1e-6);
+}
+
+TT_CASE("conformance reports the optional LRA and short term ceilings") {
+    const int fs = 48000;
+    // Six 3 s blocks alternating -26 dB and -6 dB: LRA well above 5 LU.
+    std::vector<float> x;
+    for (int k = 0; k < 6; k++) {
+        auto seg = sine(1000.0, (k % 2 == 0) ? 0.05 : 0.5, 3.0, fs);
+        x.insert(x.end(), seg.begin(), seg.end());
+    }
+    Params p;
+    p.filler = FillerMode::Off;
+    p.adaptive_leveler = false;
+    p.compress = false;
+    p.max_lra = 5.0;
+    AudioBuffer out;
+    const Report r = master(from_mono(fs, x), p, out);
+    CHECK(!r.conformant_lra);
+    CHECK(!r.conformant);
+    CHECK(r.conformant_loudness);
+    bool mentioned = false;
+    for (const std::string& w : r.warnings)
+        if (w.find("loudness range") != std::string::npos) mentioned = true;
+    CHECK(mentioned);
+    Params q = p;
+    q.max_lra = 0.0;
+    const Report r2 = master(from_mono(fs, x), q, out);
+    CHECK(r2.conformant_lra);
 }
 
 int main() { return tinytest::run_all(); }

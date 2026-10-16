@@ -119,6 +119,9 @@ struct Report {
 
     bool conformant_loudness = false;
     bool conformant_true_peak = false;
+    bool conformant_lra = true;         // max_lra == 0 or after.lra <= max_lra
+    bool conformant_short_term = true;  // max_short_term == 0 or after.max_short_term <= limit + 0.1
+    bool conformant_momentary = true;   // max_momentary == 0 or after.max_momentary <= limit + 0.1
     bool conformant = false;
     std::vector<std::string> warnings;
 
