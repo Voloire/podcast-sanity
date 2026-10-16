@@ -182,7 +182,9 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
             r3.set(v.f3, 140);
             glottal.f0 = f0_base;
             glottal.phase = 0.0;
-            for (std::size_t i = 0; i < n; i++) {
+            // The pause above can push the hesitation up to the end of the
+            // buffer, so the write has to be bounded like the word loops are.
+            for (std::size_t i = 0; i < n && start + i < total; i++) {
                 const double t = static_cast<double>(i) / n;
                 const double env = std::sin(kHalfPi * std::min(1.0, t * 3.0)) * std::sin(kHalfPi * std::min(1.0, (1.0 - t) * 6.0));
                 const double src = glottal.process();
