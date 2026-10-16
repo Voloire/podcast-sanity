@@ -16,6 +16,8 @@ BEGIN
    VALUE "ProductName", "Podcast Sanity"
    VALUE "ProductVersion", "@PROJECT_VERSION@"
    VALUE "OriginalFilename", "podcast-sanity.exe"
+   VALUE "LegalCopyright", "Franco Geraci (Voloire). GPL-3.0-or-later"
+   VALUE "Comments", "Record and master a podcast locally, offline"
   END
  END
  BLOCK "VarFileInfo"

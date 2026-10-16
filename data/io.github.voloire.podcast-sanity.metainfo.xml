@@ -39,6 +39,12 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-10-16">
+      <description>
+        <p>Multichannel loudness, a music bed with speech-driven ducking,
+        distribution profiles, a studio interface and a complete Windows MSI.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-15">
       <description>
         <p>First release: recording, the full mastering chain, loudness and true

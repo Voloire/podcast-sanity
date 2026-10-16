@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(podcast-sanity VERSION 0.1.0 LANGUAGES CXX)
+project(podcast-sanity VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -210,7 +210,8 @@ if(SANITY_WITH_GUI)
     if(WIN32)
       find_program(SANITY_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
       add_custom_command(TARGET podcast-sanity POST_BUILD
-        COMMAND "${SANITY_WINDEPLOYQT}" --release --no-translations --no-compiler-runtime
+          COMMAND "${SANITY_WINDEPLOYQT}" --release --no-translations --no-compiler-runtime
+                  --no-opengl-sw --skip-plugin-types tls,networkinformation,generic,qmltooling
                 "$<TARGET_FILE:podcast-sanity>"
         VERBATIM)
       add_test(NAME gui COMMAND podcast-sanity --selftest --selftest-seconds 8)
@@ -268,8 +269,8 @@ set(CPACK_PACKAGE_NAME "podcast-sanity")
 set(CPACK_PACKAGE_VENDOR "Voloire")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Local podcast recording and automatic mastering")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_CONTACT "Voloire <dev@voloire.local>")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/voloire/podcast-sanity")
+set(CPACK_PACKAGE_CONTACT "Voloire")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Voloire/podcast-sanity")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
 
@@ -286,6 +287,13 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 # stacking next to it.
 set(CPACK_WIX_UPGRADE_GUID "9F2C6D4E-7B31-4A58-9C0E-2D5A6F1B8E30")
 set(CPACK_WIX_PROGRAM_MENU_FOLDER "podcast-sanity")
+set(CPACK_WIX_PROPERTY_ARPHELPLINK "https://github.com/Voloire/podcast-sanity/issues")
+set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "https://github.com/Voloire/podcast-sanity")
+# WixUI_InstallDir already defines ARPNOMODIFY=1.
+set(CPACK_WIX_PROPERTY_ARPCOMMENTS "Record and master a podcast locally, offline")
+# Accepted per-user CPack warnings: same-version reinstalls (ICE61), shortcut
+# component layout (ICE69), and per-user directories by design (ICE90/ICE91).
+set(CPACK_WIX_LIGHT_EXTRA_FLAGS "-sice:ICE61" "-sice:ICE69" "-sice:ICE90" "-sice:ICE91")
 # Branding images are optional: only reference the ones that exist so the MSI
 # still builds on a bare checkout.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")

@@ -1,6 +1,7 @@
 set(bin "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_BINDIR@")
 execute_process(
   COMMAND "@SANITY_WINDEPLOYQT@" --release --no-translations --no-compiler-runtime
+          --no-opengl-sw --skip-plugin-types tls,networkinformation,generic,qmltooling
           "${bin}/podcast-sanity.exe"
   RESULT_VARIABLE result)
 if(NOT result EQUAL 0)
@@ -11,7 +12,7 @@ endif()
 file(GLOB codec_dlls "@CMAKE_CURRENT_BINARY_DIR@/Release/*.dll")
 foreach(dll IN LISTS codec_dlls)
   get_filename_component(name "${dll}" NAME)
-  if(NOT name MATCHES "^Qt6")
+  if(NOT name MATCHES "^Qt6" AND NOT name STREQUAL "opengl32sw.dll")
     file(INSTALL "${dll}" DESTINATION "${bin}")
   endif()
 endforeach()
