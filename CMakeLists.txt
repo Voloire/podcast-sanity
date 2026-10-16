@@ -241,6 +241,16 @@ endif()
 # ---- install rules --------------------------------------------------------
 include(GNUInstallDirs)
 install(TARGETS podcast-sanity-render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# Debian Policy §12.5 requires a copyright file under /usr/share/doc/<package>.
+# CPack's DEB generator does not create one, so the GPL text and the third-party
+# notices are installed explicitly on Linux.
+if(NOT WIN32)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/podcast-sanity
+          RENAME copyright)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/THIRD-PARTY.md"
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/podcast-sanity)
+endif()
 if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
   if(WIN32)
