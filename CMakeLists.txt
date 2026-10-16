@@ -169,6 +169,8 @@ if(SANITY_WITH_GUI)
       gui/app_state.cpp
       gui/audio_capture.cpp
       gui/widgets.cpp
+      gui/studio_widgets.h
+      gui/studio_widgets.cpp
       gui/theme.cpp
       gui/pages/page_base.cpp
       gui/pages/record_page.cpp
