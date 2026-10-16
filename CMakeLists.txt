@@ -25,6 +25,7 @@ set(SANITY_CORE_SOURCES
   src/json.cpp
   src/io_wav.cpp
   src/io_sndfile.cpp
+  src/distribution.cpp
   src/dsp.cpp
   src/loudness.cpp
   src/clean.cpp

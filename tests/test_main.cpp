@@ -12,6 +12,7 @@
 #include "sanity/audio.hpp"
 #include "sanity/clean.hpp"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/dsp.hpp"
 #include "sanity/dynamics.hpp"
 #include "sanity/encode.hpp"
@@ -32,6 +33,36 @@ extern "C" {
 #endif
 
 using namespace sanity;
+
+TT_CASE("distribution profiles: unique ids, one recommended, the recommended one is the hosting envelope") {
+    const auto& all = distribution_profiles();
+    CHECK_GE(static_cast<int>(all.size()), 4);
+    int recommended = 0;
+    for (std::size_t i = 0; i < all.size(); i++) {
+        if (all[i].recommended) recommended++;
+        for (std::size_t j = i + 1; j < all.size(); j++)
+            CHECK(std::string(all[i].id) != all[j].id);
+    }
+    CHECK(recommended == 1);
+    const DistributionProfile& r = recommended_distribution_profile();
+    CHECK(std::string(r.id) == "podcast-voice");
+    CHECK(r.format == ExportFormat::Mp3);
+    CHECK(r.mp3_bitrate_kbps == recommended_mp3_bitrate(1));
+    CHECK(r.channels == 1);
+    CHECK_NEAR(r.target_lufs, -19.0, 1e-9);
+    CHECK_NEAR(r.true_peak_db, -1.0, 1e-9);
+    Params p;
+    ExportOptions o;
+    apply_distribution_profile(r, p, o);
+    CHECK(p.out_channels == 1);
+    CHECK_NEAR(p.target_lufs, -19.0, 1e-9);
+    CHECK(o.format == ExportFormat::Mp3);
+    CHECK(o.mp3_bitrate_kbps == 96);
+    CHECK(distribution_label(r).find("(recommended)") != std::string::npos);
+    CHECK(find_distribution_profile("no-such-profile") == nullptr);
+    CHECK(find_distribution_profile("broadcast-r128") != nullptr);
+    CHECK_NEAR(find_distribution_profile("broadcast-r128")->target_lufs, -23.0, 1e-9);
+}
 
 TT_CASE("audio_read opens every format the build can write") {
     namespace fs = std::filesystem;
