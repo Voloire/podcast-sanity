@@ -37,35 +37,45 @@ sudo apt remove podcast-sanity
 
 ## Windows — MSI
 
+The MSI is built on Windows; the toolchain cannot cross-build it from Linux.
+vcpkg supplies LAME and libsndfile, and the CMake deploy step pulls in the Qt
+runtime, so the resulting package is self-contained.
+
 ```powershell
+# once, in the vcpkg checkout
+vcpkg install mp3lame libsndfile --triplet x64-windows
+
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-      -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON
+      -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON -DSANITY_WITH_EBUR128=OFF `
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+      -DVCPKG_TARGET_TRIPLET=x64-windows
 cmake --build build --config Release --parallel
-cd build; cpack -G WIX -C Release
+ctest --test-dir build -C Release --output-on-failure
+cd build; cpack -C Release
 # -> podcast-sanity-<version>-win64.msi
+# -> podcast-sanity-<version>-win64.zip   (same tree, no installer)
 ```
 
 Notes:
 
+* `CMAKE_TOOLCHAIN_FILE` must be a `-D` cache variable. Putting it in the
+  environment does nothing, and the build then silently loses both codecs.
 * `CPACK_WIX_UPGRADE_GUID` is fixed, so a newer MSI **upgrades** the existing
   install instead of stacking beside it. Never change it after the first public
   release.
-* The WiX generator needs the WiX Toolset on `PATH` and, for a self-contained
-  installer, the Qt runtime DLLs. `packaging/wix_patch.xml` is the hook for that
-  (see below); it is optional and the MSI builds without it.
-* Branding images (`data/podcast-sanity.ico`, `data/wix-banner.bmp`,
-  `data/wix-dialog.bmp`) are optional and referenced only when present.
+* The MSI installs to `Program Files\podcast-sanity` and creates a Start Menu
+  entry plus an uninstaller. The WiX Toolset must be on `PATH`.
+* `data/podcast-sanity.ico` is used for the Add/Remove Programs entry. The
+  optional `data/wix-banner.bmp`, `data/wix-dialog.bmp` and
+  `packaging/wix_patch.xml` are referenced only when present.
+* The Qt runtime is deployed by `qt_generate_deploy_app_script`, so no manual
+  `windeployqt` step is needed. The codec DLLs and their transitive
+  dependencies are collected from vcpkg's `bin` directory at install time.
+* `CPack`'s WiX generator accepts only a `.txt` or `.rtf` licence file, so the
+  Windows branch points it at a text copy of `LICENSE` made at configure time.
 
-### Bundling the Qt runtime
-
-Either deploy the DLLs next to the executable with `windeployqt` before running
-`cpack`:
-
-```powershell
-windeployqt --release --multimedia build\Release\podcast-sanity.exe
-```
-
-or list them in `packaging/wix_patch.xml` so WiX carries them into the MSI.
+`.github/workflows/ci.yml` runs exactly this on a `windows-2022` runner and
+publishes both artifacts, which is the supported way to produce a release.
 
 ## Codec availability
 
@@ -73,3 +83,6 @@ or list them in `packaging/wix_patch.xml` so WiX carries them into the MSI.
 MP3 via LAME, FLAC and Ogg via libsndfile, WAV always. The export page hides any
 format whose encoder is missing, so a package that ships without LAME simply
 offers WAV and FLAC instead of failing at the last click.
+
+Because that degradation is silent, the Windows CI job exports one MP3 and one
+FLAC before packaging and fails if either file is missing.

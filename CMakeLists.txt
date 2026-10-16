@@ -247,6 +247,9 @@ if(WIN32)
   endif()
   if(SANITY_VCPKG_BIN AND EXISTS "${SANITY_VCPKG_BIN}")
     file(GLOB SANITY_CODEC_RUNTIME "${SANITY_VCPKG_BIN}/*.dll")
+    # vcpkg also drops the tools it used to build the libraries in there; they
+    # are not part of the application's runtime.
+    list(FILTER SANITY_CODEC_RUNTIME EXCLUDE REGEX "[^/\\\\]*(yasm|pkgconf)[^/\\\\]*\\.dll$")
     list(LENGTH SANITY_CODEC_RUNTIME SANITY_CODEC_RUNTIME_COUNT)
     if(SANITY_CODEC_RUNTIME_COUNT GREATER 0)
       install(FILES ${SANITY_CODEC_RUNTIME} DESTINATION ${CMAKE_INSTALL_BINDIR})
