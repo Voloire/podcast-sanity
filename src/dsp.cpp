@@ -594,12 +594,11 @@ void Segmenter::features(const std::vector<float>& x, std::vector<FrameFeat>& ou
     if (ntask <= 1) {
         work(0, nf);
     } else {
+        std::atomic<int> next{0};
         std::vector<std::thread> pool;
-        bool parallel = false;
+        const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+        const int nthreads = std::min<int>(ntask, static_cast<int>(hw));
         try {
-            const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-            const int nthreads = std::min<int>(ntask, static_cast<int>(hw));
-            std::atomic<int> next{0};
             for (int t = 0; t < nthreads; t++) {
                 pool.emplace_back([&] {
                     for (;;) {
@@ -610,16 +609,14 @@ void Segmenter::features(const std::vector<float>& x, std::vector<FrameFeat>& ou
                     }
                 });
             }
-            parallel = true;
         } catch (...) {
-            parallel = false;  // fall back to a single thread below
+            // Thread creation failed part way: the threads that did start keep
+            // draining `next`; whatever is left is done on this thread below.
         }
         for (auto& t : pool)
             if (t.joinable()) t.join();
-        if (!parallel) {
-            for (int i = 0; i < ntask; i++)
-                work(i * grain, std::min(nf, i * grain + grain));
-        }
+        for (int i = next.fetch_add(1); i < ntask; i = next.fetch_add(1))
+            work(i * grain, std::min(nf, i * grain + grain));
     }
 
     // Refinement pass. Broadband noise looks exactly like a fricative frame by
