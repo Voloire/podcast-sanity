@@ -298,6 +298,7 @@ Resampler::Resampler(int in_rate, int out_rate, int taps_per_phase) {
 }
 
 std::vector<float> Resampler::process(const std::vector<float>& in) const {
+    if (in.empty()) return {};
     if (up_ == down_) return in;
     const int half = taps_ / 2;
     const long long n_in = static_cast<long long>(in.size());
@@ -342,8 +343,8 @@ std::vector<float> resample(const std::vector<float>& in, int in_rate, int out_r
 }
 
 double Resampler::peak(const std::vector<float>& in) const {
+    if (in.empty()) return 0.0;
     const long long n_in = static_cast<long long>(in.size());
-    if (n_in <= 0) return 0.0;
     // The sample peak is always a valid lower bound, and it is usually already
     // close to the true peak, which lets most windows be skipped below.
     double best = 0.0;
@@ -646,8 +647,6 @@ void Segmenter::features(const std::vector<float>& x, std::vector<FrameFeat>& ou
 void Segmenter::segments(const std::vector<FrameFeat>& feats, std::vector<Segment>& out) const {
     out.clear();
     if (feats.empty()) return;
-    double peak_db = -200.0;
-    for (const auto& f : feats) peak_db = std::max(peak_db, f.rms_db);
     std::vector<double> all;
     all.reserve(feats.size());
     for (const auto& f : feats) all.push_back(f.rms_db);
@@ -655,7 +654,6 @@ void Segmenter::segments(const std::vector<FrameFeat>& feats, std::vector<Segmen
     // level, and silence a little below the activity threshold.
     const double active_db = percentile_of(all, 0.90) - 25.0;
     const double silence_thr = active_db - 6.0;
-    (void)peak_db;
 
     SegClass cur = SegClass::Silence;
     std::size_t start = 0;

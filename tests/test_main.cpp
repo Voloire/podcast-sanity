@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "sanity/audio.hpp"
+#include "sanity/clean.hpp"
 #include "sanity/corpus.hpp"
 #include "sanity/dsp.hpp"
 #include "sanity/dynamics.hpp"
@@ -17,6 +18,7 @@
 #include "sanity/json.hpp"
 #include "sanity/loudness.hpp"
 #include "sanity/master.hpp"
+#include "sanity/metrics.hpp"
 #include "tinytest.hpp"
 
 #if SANITY_HAVE_EBUR128
@@ -344,6 +346,13 @@ TT_CASE("chained resampling is stable") {
     CHECK_NEAR(peak_abs(b), 0.4, 0.01);
 }
 
+TT_CASE("resampler accepts an empty input") {
+    const std::vector<float> empty;
+    CHECK(resample(empty, 44100, 48000).empty());
+    CHECK(oversample_4x(empty).empty());
+    CHECK_NEAR(oversample_4x_peak(empty), 0.0, 1e-12);
+}
+
 // ----------------------------------------------------------------- true peak
 TT_CASE("true peak detects inter sample peaks above the sample peak") {
     const int fs = 48000;
@@ -509,6 +518,41 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     for (const auto& s : segs)
         if (s.cls == SegClass::Silence && (s.end - s.start) * 10 >= 400) found_silence = true;
     CHECK(found_silence);
+}
+
+// ------------------------------------------------------------------ cleaning
+TT_CASE("hum detection works from a short quiet region") {
+    const int fs = 48000;
+    // 3 s of noise with 50 Hz hum at -30 dB; the segmenter features mark only
+    // the first 300 ms as non-speech, which is the only region dehum may use.
+    auto x = noise(0.02, static_cast<std::size_t>(fs) * 3, 9);
+    for (std::size_t i = 0; i < x.size(); i++)
+        x[i] += static_cast<float>(0.0316 * std::sin(kTwoPi * 50.0 * i / fs));
+    std::vector<FrameFeat> feats(x.size() / static_cast<std::size_t>(segmenter_hop(fs)));
+    for (std::size_t i = 30; i < feats.size(); i++) feats[i].speech = true;
+    const HumInfo h = dehum(x, fs, feats, -60.0, false);
+    CHECK_NEAR(h.freq, 50.0, 1e-9);
+    CHECK_GE(h.excess_db, 6.0);
+}
+
+TT_CASE("adaptive high pass applies the floor cutoff when no voice is measured") {
+    const int fs = 48000;
+    auto x = sine(30.0, 0.5, 1.0, fs);  // rumble only
+    std::vector<FrameFeat> feats(x.size() / static_cast<std::size_t>(segmenter_hop(fs)));
+    const HighpassInfo h = adaptive_highpass(x, fs, feats, 55.0, true);
+    CHECK(h.applied);
+    CHECK_NEAR(h.cutoff_used, 55.0, 1e-9);
+    CHECK_LE(peak_abs(std::vector<float>(x.begin() + fs / 2, x.end())), 0.25);
+}
+
+TT_CASE("score_intervals rejects a detection that runs far past the truth") {
+    const int fs = 48000;
+    std::vector<Interval> truth = {{48000, 72000}};         // 1.0 s .. 1.5 s
+    std::vector<Interval> good = {{47000, 73000}};          // within 50 ms
+    std::vector<Interval> greedy = {{47000, 120000}};       // eats a whole second after
+    CHECK(score_intervals(good, truth, fs, 50.0).true_positive == 1);
+    CHECK(score_intervals(greedy, truth, fs, 50.0).true_positive == 0);
+    CHECK(score_intervals(greedy, truth, fs, 50.0).false_positive == 1);
 }
 
 // ------------------------------------------------------ peak-limited normalise

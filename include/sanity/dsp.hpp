@@ -84,7 +84,6 @@ private:
     StftConfig cfg_;
     Fft fft_;
     std::vector<float> win_;
-    std::vector<float> norm_;
 };
 
 // ---------------------------------------------------------------- resampler

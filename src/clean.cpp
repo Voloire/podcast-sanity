@@ -190,8 +190,6 @@ HumInfo dehum(std::vector<float>& x, int sample_rate, const std::vector<FrameFea
               double noise_floor_db, bool apply) {
     HumInfo info;
     if (x.empty()) return info;
-    const int seg_hop = segmenter_hop(sample_rate);
-    (void)seg_hop;
     const auto regions = quiet_regions(feats, sample_rate, 200.0);
     std::size_t a = 0, b = x.size();
     if (!regions.empty()) {
@@ -204,6 +202,10 @@ HumInfo dehum(std::vector<float>& x, int sample_rate, const std::vector<FrameFea
         a = regions[best].begin_sample;
         b = regions[best].end_sample;
     }
+    // Frequency resolution of the measurement region: a short region has a wide
+    // spectral main lobe, so the probes have to spread out with it.
+    const double res =
+        static_cast<double>(sample_rate) / static_cast<double>(std::max<std::size_t>(1, b - a));
     auto hum_strength = [&](double f) { return tone_level_db(x, sample_rate, f, a, b); };
     // A mains tone is only real if it stands out from its own neighbourhood:
     // comparing it with the broadband noise floor fails whenever the recording
@@ -213,7 +215,10 @@ HumInfo dehum(std::vector<float>& x, int sample_rate, const std::vector<FrameFea
         const double tone = hum_strength(f);
         if (tone < -150.0) return -1e30;
         double near = -1e30;
-        for (double d : {3.0, 5.0, 8.0, 12.0}) {
+        // Every probe sits at least two bins away from the tone, where the
+        // window leakage of the tone itself has died down.
+        for (double d : {std::max(3.0, 2.0 * res), std::max(5.0, 3.0 * res),
+                         std::max(8.0, 4.0 * res), std::max(12.0, 6.0 * res)}) {
             if (f - d > 5.0) near = std::max(near, hum_strength(f - d));
             if (f + d < sample_rate * 0.45) near = std::max(near, hum_strength(f + d));
         }
@@ -290,7 +295,7 @@ HighpassInfo adaptive_highpass(std::vector<float>& x, int sample_rate,
     info.cutoff_min = cut;
     info.cutoff_max = cut;
     info.cutoff_used = cut;
-    if (!apply || cut <= floor_hz + 0.01) return info;
+    if (!apply) return info;
 
     Biquad hp = Biquad::highpass(sample_rate, cut, 0.707);
     biquad_apply(hp, x);
@@ -490,11 +495,10 @@ DeessInfo deess(std::vector<float>& x, int sample_rate, double amount) {
     biquad_apply_zero_phase(lp, band);
 
     // Side chain: full band envelope and sibilant band envelope.
-    const int atk = std::max(1, sample_rate / 2000);   // 0.5 ms
     const int rel = std::max(1, sample_rate / 20);     // 50 ms
     double env_full = 0.0, env_band = 0.0;
     double max_red = 0.0;
-    double before_sum = 0.0, after_sum = 0.0;
+    double before_sum = 0.0;
     long long cnt = 0;
     std::vector<float> out(x.size());
     const double max_drop = 9.0 * std::min(1.0, amount);  // dB
@@ -503,7 +507,6 @@ DeessInfo deess(std::vector<float>& x, int sample_rate, double amount) {
         const double ab = std::fabs(static_cast<double>(band[i]));
         env_full = af > env_full ? af : env_full + (af - env_full) / rel;
         env_band = ab > env_band ? ab : env_band + (ab - env_band) / rel;
-        (void)atk;
         const double ratio = env_band / (env_full + 1e-9);
         // Above this ratio the material is sibilant and gets tamed.
         const double knee = 0.35;
@@ -516,12 +519,10 @@ DeessInfo deess(std::vector<float>& x, int sample_rate, double amount) {
         if (-red > max_red) max_red = -red;
         out[i] = static_cast<float>(x[i] - (1.0 - g) * band[i]);
         before_sum += ab * ab;
-        after_sum += static_cast<double>(band[i]) * band[i] * g * g;
         cnt++;
     }
     info.max_reduction_db = max_red;
     if (before_sum > 0) info.sibilance_before_db = 10.0 * std::log10(before_sum / std::max(1LL, cnt));
-    (void)after_sum;
     x = out;
     info.applied = true;
     return info;
