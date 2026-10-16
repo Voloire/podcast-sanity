@@ -371,8 +371,22 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
         add_metric(r, "compressor", "average_reduction_db", c.gain_reduction_db);
     });
 
-    // ---------------------------------------------------- 10. loudness + true peak
+    // ---------------------------------------------------- 10. output format
     const int out_channels = p.out_channels > 0 ? p.out_channels : in.channels;
+    const int out_rate = p.out_sample_rate > 0 ? p.out_sample_rate : in_rate;
+    const bool out_changed = out_rate != in_rate || out_channels != in.channels;
+    // The rate change happens before normalisation so the limiter measures and
+    // limits at the delivered rate: resampling after the limiter can move the
+    // measured loudness off target.
+    run_stage(r, "output", out_changed, audio_ms, [&] {
+        if (out_rate != in_rate) {
+            mono = resample(mono, in_rate, out_rate);
+            add_metric(r, "output", "resampled_to_hz", static_cast<double>(out_rate));
+        }
+        add_metric(r, "output", "channels", static_cast<double>(out_channels));
+    });
+
+    // ---------------------------------------------------- 11. loudness + true peak
     double target = p.target_lufs;
     if (target == 0.0) target = out_channels >= 2 ? -16.0 : -19.0;
     // The chain works on one channel that is later copied to `out_channels`.
@@ -381,7 +395,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     const double mono_target = target - channel_sum_db(out_channels);
     run_stage(r, "normalize", p.normalize, audio_ms, [&] {
         const LoudnessTargetInfo n =
-            normalize_loudness(mono, in_rate, mono_target, p.target_true_peak_db, p.max_short_term,
+            normalize_loudness(mono, out_rate, mono_target, p.target_true_peak_db, p.max_short_term,
                                p.max_momentary);
         add_metric(r, "normalize", "mono_target_lufs", mono_target);
         add_metric(r, "normalize", "target_lufs", n.target_lufs);
@@ -394,17 +408,6 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
         add_metric(r, "normalize", "limiter_reduction_db", n.limiter_reduction_db);
         add_metric(r, "normalize", "limiter_max_reduction_db", n.limiter_max_reduction_db);
         add_metric(r, "normalize", "peak_rounds", static_cast<double>(n.peak_rounds));
-    });
-
-    // ---------------------------------------------------- 11. output format
-    const int out_rate = p.out_sample_rate > 0 ? p.out_sample_rate : in_rate;
-    const bool out_changed = out_rate != in_rate || out_channels != in.channels;
-    run_stage(r, "output", out_changed, audio_ms, [&] {
-        if (out_rate != in_rate) {
-            mono = resample(mono, in_rate, out_rate);
-            add_metric(r, "output", "resampled_to_hz", static_cast<double>(out_rate));
-        }
-        add_metric(r, "output", "channels", static_cast<double>(out_channels));
     });
     out = mono_to_channels(out_rate, mono, out_channels);
 

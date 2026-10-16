@@ -410,6 +410,22 @@ TT_CASE("e2e: a stereo delivery reads -16 LUFS on a multichannel BS.1770 meter")
     CHECK(rep.conformant);
 }
 
+TT_CASE("e2e: a 44.1 kHz delivery from 48 kHz material keeps the target and the ceiling") {
+    if (!wanted("resample")) return;
+    Params p = base_params();
+    p.out_sample_rate = 44100;
+    CorpusItem item = make_item("home", opts().seconds);
+    const AudioBuffer in = buffer_of(item.degraded, item.sample_rate);
+    AudioBuffer out;
+    const Report rep = master(in, p, out);
+    CHECK(out.sample_rate == 44100);
+    const LoudnessStats real = measure_loudness(out);
+    print_line("resample", real.integrated_lufs, real.true_peak_db);
+    CHECK(std::fabs(real.integrated_lufs - (-19.0)) <= 0.1);  // the engine lands within 0.05 LU
+    CHECK_LE(real.true_peak_db, -1.0 + 0.02);
+    CHECK(rep.conformant);
+}
+
 // The harness itself is a quality gate: scenarios must have run and the report
 // must be machine readable even when checks failed.
 TT_CASE("e2e: harness produced a report for every scenario") {
