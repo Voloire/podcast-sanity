@@ -12,6 +12,7 @@ service that matter for spoken word:
 * loudness and true peak to the delivery standard (BS.1770-4), default
   −19 LUFS mono / −16 LUFS stereo, true peak ≤ −1 dBTP
 * a **Talk** preset and a **Music** preset
+* **Background music bed with ducking and a 15 s preview**
 
 Ships as a Windows **MSI** and a Linux **.deb**, from one CMake project.
 

@@ -63,9 +63,10 @@ Stage order in `master()` (`src/pipeline.cpp`):
 | 8 | `deess` | sibilance control |
 | 9 | `leveler` | Smart Adaptive Leveling |
 | 10 | `compressor` | gentle peak control |
-| 11 | `normalize` | iterating loudness + true peak normalisation |
-| 12 | `analyze_out` | re-measure, build the conformance verdict |
-| 13 | output | resample / duplicate channels if requested |
+| 11 | `music_bed` | speech-driven ducking, loop, fades and tail |
+| 12 | `output` | resample before normalisation; select output channels |
+| 13 | `normalize` | iterating loudness + true peak normalisation |
+| 14 | `analyze_out` | measure the delivered channels and build the conformance verdict |
 
 The order matters. Repair comes first because a click is broadband and would
 otherwise be smeared by every later stage. Filler removal comes before the
@@ -157,6 +158,25 @@ WAV 16/24/32f always; MP3 through LAME; FLAC and Ogg through libsndfile, each
 when the build has them (otherwise the option is hidden in the GUI).
 `recommended_mp3_bitrate()` encodes the hosting rule: mono ≤ 96 kbps and stereo
 ≤ 192 kbps are the envelopes most hosts promise not to re-encode.
+
+---
+
+### 2.8 Music bed (`src/music_bed.cpp`)
+
+The bed's pause level is relative to the active speech level (default -14 dB).
+The segmenter's 10 ms speech frames drive an additional -10 dB duck, with an
+80 ms attack, 300 ms hold and 700 ms release. Asymmetric smoothing in dB and
+per-sample interpolation avoid abrupt gain changes. Music is mono-summed and
+resampled to the speech rate; repeated loops have 50 ms equal-power crossfades.
+Raised-cosine fades shape the beginning and end, an offset delays the start,
+and an optional tail extends the output after speech ends.
+
+The stage follows the Filler Killer so cuts affect speech alone, using the
+recomputed post-cut features. It precedes output resampling and normalisation
+so the delivery loudness and true-peak ceiling cover the entire mix. Its report
+records reference levels, duck ratio, loop count and tail duration. The GUI
+stores the music path and settings with the session and offers a 15-second
+preview (plus at most three seconds of tail).
 
 ---
 

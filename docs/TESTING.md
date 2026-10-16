@@ -77,6 +77,7 @@ hesitations).
 | Determinism | byte-identical audio and equal `params_hash` | Same input and parameters, same bytes, every time |
 | Report completeness | every enabled stage present, with metrics | The observability contract |
 | Music preset | runs and stays inside the tolerance | A second chain, not just talk |
+| Music bed | conformant, frames = plain + tail, same filler count, deterministic | Mix loudness covers the bed; filler cuts apply to speech alone |
 
 Measured on the executed runs; the worst profile is `rough` in every run, and
 speech preservation is measured on filler-off runs:
