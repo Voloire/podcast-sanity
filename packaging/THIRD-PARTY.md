@@ -18,3 +18,8 @@ of their respective owners.
 
 DLLs are installed beside the executables and may be replaced with compatible
 versions. No container, Python interpreter or development SDK is required to run.
+
+The Ubuntu font family is embedded under the Ubuntu Font Licence 1.0
+(licenses/ubuntu-font/UFL-1.0.txt).
+Source: https://assets.ubuntu.com/v1/0cef8205-ubuntu-font-family-0.83.zip
+SHA-256: 61a2b342526fd552f19fef438bb9211a8212de19ad96e32a1209c039f1d68ecf

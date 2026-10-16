@@ -3,6 +3,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QSettings>
 #include <QScrollArea>
 #include <QStandardPaths>
@@ -37,6 +38,10 @@ public:
         : window_(w), seconds_(seconds), shots_(shots_dir) {}
 
     void start() {
+        if (!shots_.isEmpty()) {
+            gui::set_mode(gui::ThemeMode::Studio);
+            gui::AppState::get().theme_changed();
+        }
         // Walk the pages: constructing and painting each one exercises the
         // signal wiring.
         step(0);
@@ -172,6 +177,19 @@ private:
     void capture_after(int i) {
         const int* pages = after_pages();
         if (i >= 4) {
+            if (!shots_.isEmpty()) {
+                QDir(shots_).mkpath(QStringLiteral("themes"));
+                window_->select_page(0);
+                for (auto mode : {gui::ThemeMode::Light, gui::ThemeMode::Dark}) {
+                    gui::set_mode(mode);
+                    gui::AppState::get().theme_changed();
+                    QApplication::processEvents();
+                    grab(0, mode == gui::ThemeMode::Light ? QStringLiteral("themes/light")
+                                                        : QStringLiteral("themes/dark"));
+                }
+                gui::set_mode(gui::ThemeMode::Studio);
+                gui::AppState::get().theme_changed();
+            }
             std::printf("selftest: OK\n");
             std::fflush(stdout);
             QApplication::quit();
@@ -211,6 +229,10 @@ int main(int argc, char** argv) {
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/podcast-sanity.ico")));
 
     // Fusion looks the same everywhere, which is what the QSS theme expects.
+    for (const char* f : {":/fonts/Ubuntu-Regular.ttf", ":/fonts/Ubuntu-Medium.ttf",
+                          ":/fonts/Ubuntu-Bold.ttf", ":/fonts/UbuntuMono-Regular.ttf"})
+        QFontDatabase::addApplicationFont(QString::fromLatin1(f));
+    QApplication::setFont(QFont(gui::ui_family(), 10));
     if (QStyleFactory::keys().contains(QStringLiteral("Fusion")))
         QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
@@ -255,8 +277,9 @@ int main(int argc, char** argv) {
     }
 
     QSettings st;
-    gui::set_mode(st.value("ui/theme", 0).toInt() == 1 ? gui::ThemeMode::Dark
-                                                       : gui::ThemeMode::Light);
+    const int theme = st.value("ui/theme", 2).toInt();
+    gui::set_mode(theme == 0 ? gui::ThemeMode::Light : theme == 1 ? gui::ThemeMode::Dark
+                                                               : gui::ThemeMode::Studio);
 
     gui::MainWindow window;
     app.setStyleSheet(gui::style_sheet());

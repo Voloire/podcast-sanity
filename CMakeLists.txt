@@ -188,6 +188,10 @@ if(SANITY_WITH_GUI)
     endif()
     qt_add_resources(podcast-sanity app_icon PREFIX "/" BASE data
       FILES data/podcast-sanity.ico)
+    qt_add_resources(podcast-sanity app_fonts PREFIX "/fonts" BASE data/fonts
+      FILES data/fonts/Ubuntu-Regular.ttf data/fonts/Ubuntu-Medium.ttf
+            data/fonts/Ubuntu-Bold.ttf data/fonts/UbuntuMono-Regular.ttf)
+    install(FILES data/fonts/UFL-1.0.txt DESTINATION licenses/ubuntu-font)
     if(TARGET Qt6::Multimedia)
       target_link_libraries(podcast-sanity PRIVATE Qt6::Multimedia)
       target_compile_definitions(podcast-sanity PRIVATE SANITY_HAVE_QTMM=1)
@@ -208,6 +212,9 @@ if(SANITY_WITH_GUI)
                 "$<TARGET_FILE:podcast-sanity>"
         VERBATIM)
       add_test(NAME gui COMMAND podcast-sanity --selftest --selftest-seconds 8)
+      add_test(NAME gui_shots COMMAND podcast-sanity --selftest --selftest-seconds 8
+               --selftest-shots "${CMAKE_CURRENT_BINARY_DIR}/shots")
+      set_tests_properties(gui_shots PROPERTIES TIMEOUT 300 PASS_REGULAR_EXPRESSION "selftest: OK")
     elseif(XVFB_RUN)
       add_test(NAME gui
         COMMAND ${XVFB_RUN} -a "--server-args=-screen 0 1400x900x24"

@@ -237,17 +237,19 @@ void MainWindow::start_mastering() {
 }
 
 void MainWindow::toggle_theme() {
-    set_mode(mode() == ThemeMode::Light ? ThemeMode::Dark : ThemeMode::Light);
+    set_mode(mode() == ThemeMode::Light ? ThemeMode::Dark :
+             mode() == ThemeMode::Dark ? ThemeMode::Studio : ThemeMode::Light);
     QSettings st;
-    st.setValue("ui/theme", mode() == ThemeMode::Dark ? 1 : 0);
+    st.setValue("ui/theme", static_cast<int>(mode()));
     apply_theme();
 }
 
 void MainWindow::apply_theme() {
     qApp->setStyleSheet(style_sheet());
     if (theme_btn_)
-        theme_btn_->setText(mode() == ThemeMode::Light ? QStringLiteral("Passa al tema scuro")
-                                                       : QStringLiteral("Passa al tema chiaro"));
+        theme_btn_->setText(mode() == ThemeMode::Light ? QStringLiteral("Tema: chiaro") :
+                            mode() == ThemeMode::Dark ? QStringLiteral("Tema: scuro")
+                                                      : QStringLiteral("Tema: studio"));
 }
 
 void MainWindow::show_about() {

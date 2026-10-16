@@ -36,13 +36,14 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
     const int at = col->count() - 1;
 
     auto* look = new Card(QStringLiteral("Aspetto"),
-                          QStringLiteral("Tema chiaro panna/salvia o scuro."));
+                          QStringLiteral("Tema chiaro, scuro o studio con accenti ambra."));
     {
         theme_ = new QComboBox();
         theme_->addItem(QStringLiteral("Chiaro (panna e salvia)"), 0);
         theme_->addItem(QStringLiteral("Scuro"), 1);
+        theme_->addItem(QStringLiteral("Studio (scuro, ambra)"), 2);
         QSettings st;
-        theme_->setCurrentIndex(st.value("ui/theme", 0).toInt());
+        theme_->setCurrentIndex(st.value("ui/theme", 2).toInt());
         connect(theme_, &QComboBox::currentIndexChanged, this, [this] { apply_theme(); });
         look->add_widget(make_row(QStringLiteral("Tema"), theme_));
     }
@@ -143,7 +144,8 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
 void SettingsPage::apply_theme() {
     QSettings st;
     st.setValue("ui/theme", theme_->currentIndex());
-    set_mode(theme_->currentIndex() == 1 ? ThemeMode::Dark : ThemeMode::Light);
+    set_mode(theme_->currentIndex() == 0 ? ThemeMode::Light :
+             theme_->currentIndex() == 1 ? ThemeMode::Dark : ThemeMode::Studio);
     emit AppState::get().theme_changed();
     AppState::get().status_message(QStringLiteral("Tema aggiornato"));
 }
@@ -178,7 +180,7 @@ void SettingsPage::reset_defaults() {
     filler_->setCurrentIndex(1);
     power_clean_->setChecked(true);
     default_format_->setCurrentIndex(0);
-    theme_->setCurrentIndex(0);
+    theme_->setCurrentIndex(2);
     apply_theme();
     AppState::get().set_library_dir(QDir::homePath() + QStringLiteral("/PodcastSanity"));
     library_->setText(AppState::get().library_dir());
