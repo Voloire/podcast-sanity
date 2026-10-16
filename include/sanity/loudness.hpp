@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "sanity/audio.hpp"
+
 namespace sanity {
 
 // K-weighting: stage 1 high shelf (+4 dB @ ~1681.97 Hz, Q 0.70718),
@@ -32,6 +34,16 @@ struct LoudnessStats {
 
 // 100 ms gating blocks, -70 LUFS absolute gate and -10 LU relative gate.
 LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate);
+
+// BS.1770-4 for an interleaved buffer: every channel is K-weighted on its own,
+// the block energies are summed over channels (weight 1.0 each; surround
+// weights are out of scope) and gated once. The true peak is the maximum over
+// channels.
+LoudnessStats measure_loudness(const AudioBuffer& b);
+double integrated_lufs(const AudioBuffer& b);
+
+// 10 log10(N): how much louder N identical channels read than one of them.
+double channel_sum_db(int channels);
 
 // Integrated loudness only. It runs a single K-weighting pass and skips the
 // true peak oversampling and the loudness range pass, which makes it cheap

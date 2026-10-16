@@ -451,4 +451,25 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     CHECK(found_silence);
 }
 
+// ------------------------------------------------------- multichannel loudness
+TT_CASE("dual mono stereo measures 3.01 dB louder than the mono signal (BS.1770 channel sum)") {
+    const int fs = 48000;
+    const auto mono = sine(1000.0, 0.1, 5.0, fs);
+    const AudioBuffer stereo = mono_to_channels(fs, mono, 2);
+    const double l_mono = measure_loudness(mono, fs).integrated_lufs;
+    const double l_stereo = measure_loudness(stereo).integrated_lufs;
+    CHECK_NEAR(l_stereo - l_mono, 3.0103, 0.05);
+    CHECK_NEAR(channel_sum_db(2), 3.0103, 1e-6);
+    CHECK_NEAR(channel_sum_db(1), 0.0, 1e-9);
+}
+
+TT_CASE("a stereo file with one silent channel measures like the mono signal") {
+    const int fs = 48000;
+    const auto mono = sine(1000.0, 0.1, 5.0, fs);
+    AudioBuffer b = AudioBuffer::zeros(fs, 2, mono.size());
+    for (std::size_t i = 0; i < mono.size(); i++) b.data[2 * i] = mono[i];
+    CHECK_NEAR(measure_loudness(b).integrated_lufs, measure_loudness(mono, fs).integrated_lufs, 0.05);
+    CHECK_NEAR(measure_loudness(b).true_peak_db, true_peak_db(mono, fs), 1e-6);
+}
+
 int main() { return tinytest::run_all(); }

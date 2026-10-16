@@ -141,6 +141,14 @@ Analysis analyze(const std::vector<float>& mono, int sample_rate);
 Analysis analyze(const std::vector<float>& mono, int sample_rate,
                  const std::vector<FrameFeat>& feats);
 
+// Measures an interleaved buffer: loudness, true peak and peak statistics are
+// BS.1770 multichannel values; the content features (noise, hum, RT60, speech
+// ratio) are measured on the mono sum, which is what the chain processes.
+Analysis analyze(const AudioBuffer& b);
+// Overwrites the loudness and peak fields of `a` with the multichannel
+// measurement of `b` and sets a.channels. No-op for mono.
+void apply_multichannel_loudness(Analysis& a, const AudioBuffer& b);
+
 // Filler Killer: hesitation candidate detection (acoustic, no ASR).
 std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
                                       FillerMode mode,

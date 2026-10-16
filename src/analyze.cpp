@@ -185,4 +185,24 @@ Analysis analyze(const std::vector<float>& mono, int sample_rate,
     return analyze_impl(mono, sample_rate, feats);
 }
 
+void apply_multichannel_loudness(Analysis& a, const AudioBuffer& b) {
+    a.channels = b.channels;
+    if (b.channels <= 1) return;
+    const LoudnessStats m = measure_loudness(b);
+    a.integrated_lufs = m.integrated_lufs;
+    a.lra = m.lra;
+    a.true_peak_db = m.true_peak_db;
+    a.sample_peak_db = m.sample_peak_db;
+    a.max_momentary = m.max_momentary;
+    a.max_short_term = m.max_short_term;
+    a.dc_offset = m.dc_offset;
+    a.clipped_samples = m.clipped_samples;
+}
+
+Analysis analyze(const AudioBuffer& b) {
+    Analysis a = analyze(to_mono(b), b.sample_rate);
+    apply_multichannel_loudness(a, b);
+    return a;
+}
+
 }  // namespace sanity

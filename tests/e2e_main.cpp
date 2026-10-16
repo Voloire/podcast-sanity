@@ -247,6 +247,10 @@ void print_scenario(const ScenarioResult& s) {
         s.si_sdr_after_db, s.noise_floor_before_db, s.noise_floor_after_db, s.rtf);
 }
 
+void print_line(const char* name, double lufs, double tp) {
+    std::printf("    %-8s lufs %.2f tp %.2f\n", name, lufs, tp);
+}
+
 std::string json_report() {
     JsonWriter w;
     w.begin_object();
@@ -375,6 +379,24 @@ TT_CASE("e2e: music preset runs and stays inside the loudness tolerance") {
     print_scenario(s);
     CHECK(std::fabs(s.loudness_error_lu) <= 1.0);
     CHECK_LE(s.true_peak_dbtp, -1.0 + 0.02);
+}
+
+TT_CASE("e2e: a stereo delivery reads -16 LUFS on a multichannel BS.1770 meter") {
+    if (!wanted("stereo")) return;
+    Params p = base_params();
+    p.out_channels = 2;  // target_lufs stays 0 = auto, which must pick -16 for stereo
+    CorpusItem item = make_item("home", opts().seconds);
+    const AudioBuffer in = buffer_of(item.degraded, item.sample_rate);
+    AudioBuffer out;
+    const Report rep = master(in, p, out);
+    CHECK(out.channels == 2);
+    CHECK(rep.after.channels == 2);
+    const LoudnessStats real = measure_loudness(out);
+    print_line("stereo", real.integrated_lufs, real.true_peak_db);
+    CHECK(std::fabs(real.integrated_lufs - (-16.0)) <= 1.0);
+    CHECK_LE(real.true_peak_db, -1.0 + 0.02);
+    CHECK(std::fabs(rep.after.integrated_lufs - real.integrated_lufs) < 0.01);
+    CHECK(rep.conformant);
 }
 
 // The harness itself is a quality gate: scenarios must have run and the report

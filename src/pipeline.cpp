@@ -256,7 +256,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
 
     if (mono.size() < static_cast<std::size_t>(in_rate) / 20) {
         r.warnings.push_back("input shorter than 50 ms: nothing to process");
-        run_stage(r, "analyze_in", true, audio_ms, [&] { r.before = analyze(mono, in_rate); });
+        run_stage(r, "analyze_in", true, audio_ms, [&] { r.before = analyze(in); });
         out = in;
         r.after = r.before;
         r.frames_out = out.frames();
@@ -269,8 +269,10 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     std::vector<FrameFeat> feats;
     seg.features(mono, feats);
 
-    run_stage(r, "analyze_in", true, audio_ms,
-              [&] { r.before = analyze(mono, in_rate, feats); });
+    run_stage(r, "analyze_in", true, audio_ms, [&] {
+        r.before = analyze(mono, in_rate, feats);
+        apply_multichannel_loudness(r.before, in);
+    });
 
     const double floor_hz = (p.preset == Preset::Talk) ? 55.0 : 30.0;
     const double denoise_strength = p.denoise_strength >= 0.0
@@ -373,10 +375,15 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     const int out_channels = p.out_channels > 0 ? p.out_channels : in.channels;
     double target = p.target_lufs;
     if (target == 0.0) target = out_channels >= 2 ? -16.0 : -19.0;
+    // The chain works on one channel that is later copied to `out_channels`.
+    // N identical channels read channel_sum_db(N) louder on a BS.1770 meter, so
+    // the mono is normalised that much below the delivery target.
+    const double mono_target = target - channel_sum_db(out_channels);
     run_stage(r, "normalize", p.normalize, audio_ms, [&] {
         const LoudnessTargetInfo n =
-            normalize_loudness(mono, in_rate, target, p.target_true_peak_db, p.max_short_term,
+            normalize_loudness(mono, in_rate, mono_target, p.target_true_peak_db, p.max_short_term,
                                p.max_momentary);
+        add_metric(r, "normalize", "mono_target_lufs", mono_target);
         add_metric(r, "normalize", "target_lufs", n.target_lufs);
         add_metric(r, "normalize", "achieved_lufs", n.achieved_lufs);
         add_metric(r, "normalize", "error_lu", n.error_lu);
@@ -402,7 +409,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     out = mono_to_channels(out_rate, mono, out_channels);
 
     r.frames_out = out.frames();
-    run_stage(r, "analyze_out", true, audio_ms, [&] { r.after = analyze(mono, out_rate); });
+    run_stage(r, "analyze_out", true, audio_ms, [&] { r.after = analyze(out); });
 
     // ---------------------------------------------------- conformance
     const double loud_tol = 1.0;
