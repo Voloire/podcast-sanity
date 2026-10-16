@@ -18,6 +18,7 @@
 #include "app_state.h"
 #include "mainwindow.h"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/master.hpp"
 #include "theme.h"
@@ -100,12 +101,12 @@ private:
         }
 
         // Export through the real encoder and check the file really exists.
+        sanity::Params unused = gui::AppState::get().session().params;
         sanity::ExportOptions o;
-        o.format = sanity::ExportFormat::Mp3;
-        o.mp3_bitrate_kbps = sanity::recommended_mp3_bitrate(
-            gui::AppState::get().session().mastered.channels);
+        sanity::apply_distribution_profile(sanity::recommended_distribution_profile(), unused, o);
         const QString path = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-                                 .filePath("podcast-sanity-selftest.mp3");
+                                 .filePath(QStringLiteral("podcast-sanity-selftest") +
+                                           QString::fromStdString(sanity::export_extension(o.format)));
         std::string e;
         if (sanity::encoder_available(o.format)) {
             if (!sanity::encode_audio(path.toStdString(), gui::AppState::get().session().mastered,
@@ -116,7 +117,7 @@ private:
             const qint64 size = QFileInfo(path).size();
             std::printf("selftest: wrote %s (%lld bytes, %s)\n", path.toUtf8().constData(),
                         static_cast<long long>(size),
-                        sanity::export_format_name(o).c_str());
+                        sanity::distribution_label(sanity::recommended_distribution_profile()).c_str());
             if (size < 1024) {
                 std::fprintf(stderr, "selftest: exported file looks empty\n");
                 std::exit(6);

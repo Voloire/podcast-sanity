@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include "pages/pages.h"
+#include "sanity/distribution.hpp"
 #include "theme.h"
 #include "widgets.h"
 
@@ -66,18 +67,23 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
         defaults->add_widget(make_row(QStringLiteral("Power Clean di default"), power_clean_));
 
         default_format_ = new QComboBox();
-        default_format_->addItem(QStringLiteral("MP3 96 kbps (mono)"), 0);
-        default_format_->addItem(QStringLiteral("MP3 192 kbps (stereo)"), 1);
-        default_format_->addItem(QStringLiteral("WAV 24 bit"), 2);
-        default_format_->addItem(QStringLiteral("FLAC 24 bit"), 3);
-        defaults->add_widget(make_row(QStringLiteral("Formato di esportazione predefinito"),
+        for (const sanity::DistributionProfile& d : sanity::distribution_profiles()) {
+            QString label = QString::fromUtf8(d.name);
+            if (d.recommended) label += QStringLiteral(" (recommended)");
+            default_format_->addItem(label, QString::fromUtf8(d.id));
+        }
+        defaults->add_widget(make_row(QStringLiteral("Profilo di distribuzione predefinito"),
                                       default_format_));
 
         QSettings st;
         preset_->setCurrentIndex(st.value("master/preset", 0).toInt());
         filler_->setCurrentIndex(st.value("master/filler", 1).toInt());
         power_clean_->setChecked(st.value("master/power_clean", true).toBool());
-        default_format_->setCurrentIndex(st.value("export/format", 0).toInt());
+        st.remove("export/format");
+        const QString id = st.value("export/profile",
+            QString::fromUtf8(sanity::recommended_distribution_profile().id)).toString();
+        const int index = default_format_->findData(id);
+        default_format_->setCurrentIndex(index >= 0 ? index : 0);
 
         auto* save = new QPushButton(QStringLiteral("Salva i predefiniti"));
         save->setObjectName("Primary");
@@ -156,7 +162,7 @@ void SettingsPage::save_defaults() {
     st.setValue("master/preset", preset_->currentIndex());
     st.setValue("master/filler", filler_->currentIndex());
     st.setValue("master/power_clean", power_clean_->isChecked());
-    st.setValue("export/format", default_format_->currentIndex());
+    st.setValue("export/profile", default_format_->currentData().toString());
     st.sync();
     AppState::get().set_params(AppState::get().default_params());
     AppState::get().status_message(QStringLiteral("Predefiniti salvati"));

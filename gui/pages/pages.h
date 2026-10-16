@@ -243,6 +243,8 @@ public:
     explicit ExportPage(QWidget* parent = nullptr);
 
 private:
+    void apply_profile();
+    void custom_profile();
     void refresh();
     void do_export();
     void copy_rss();
@@ -254,6 +256,9 @@ private:
     Card* format_card_ = nullptr;
     Card* conform_card_ = nullptr;
     Card* publish_card_ = nullptr;
+    QComboBox* profile_ = nullptr;
+    QLabel* profile_note_ = nullptr;
+    bool applying_profile_ = false;
     QComboBox* format_ = nullptr;
     QComboBox* channels_ = nullptr;
     QComboBox* rate_ = nullptr;

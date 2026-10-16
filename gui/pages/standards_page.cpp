@@ -32,8 +32,8 @@ struct Standard {
 };
 
 const Standard kStandards[] = {
-    {"Apple Podcasts - voce mono", -19.0, -1.0,
-     "Apple Authoring Practices: -19 LUFS mono, true peak -1 dBTP."},
+    {"Apple Podcasts - voce mono (recommended)", -19.0, -1.0,
+     "Apple Authoring Practices: -19 LUFS mono, true peak -1 dBTP. E il profilo di distribuzione consigliato."},
     {"Apple Podcasts - stereo", -16.0, -1.0,
      "Apple Authoring Practices: -16 LUFS stereo, true peak -1 dBTP."},
     {"Spotify (target di riproduzione)", -14.0, -1.0,
