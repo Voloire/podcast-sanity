@@ -41,6 +41,7 @@ const FormatOption kFormats[] = {
     {"WAV 32 bit float", sanity::ExportFormat::WavFloat32, 0},
     {"FLAC 24 bit (senza perdita)", sanity::ExportFormat::Flac, 0},
     {"Ogg Vorbis", sanity::ExportFormat::Ogg, 0},
+    {"Opus (Ogg)", sanity::ExportFormat::Opus, 0},
 };
 }  // namespace
 

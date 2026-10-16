@@ -48,6 +48,8 @@ struct AudioBuffer {
 bool wav_read(const std::string& path, AudioBuffer& out, std::string& err);
 // Writes 32-bit float WAV when float32 is true, else 16-bit PCM.
 bool wav_write(const std::string& path, const AudioBuffer& in, bool float32, std::string* err);
+// Writes 24-bit PCM WAV without going through libsndfile.
+bool wav_write_pcm24(const std::string& path, const AudioBuffer& in, std::string* err);
 
 // Averages all channels into one.
 std::vector<float> to_mono(const AudioBuffer& b);

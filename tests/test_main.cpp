@@ -44,7 +44,7 @@ TT_CASE("exports: Unicode paths, formats and stereo channel separation") {
     for (std::size_t i = 0; i < audio.frames(); ++i)
         audio.data[2 * i] = static_cast<float>(0.4 * std::sin(kTwoPi * 440 * i / 48000));
     for (auto format : {ExportFormat::Wav16, ExportFormat::Wav24, ExportFormat::Flac,
-                        ExportFormat::Ogg, ExportFormat::Mp3}) {
+                        ExportFormat::Ogg, ExportFormat::Mp3, ExportFormat::Opus}) {
         if (!encoder_available(format)) continue;
         const auto path = dir / fs::u8path("episodio-\xc3\xa8-\xe6\xb8\xac" + export_extension(format));
         const auto utf8 = path.u8string();
@@ -88,6 +88,55 @@ TT_CASE("exports: Unicode paths, formats and stereo channel separation") {
         }
 #endif
     }
+}
+
+TT_CASE("mp3 export at 96 kHz keeps the channel count and resamples each channel") {
+    if (!encoder_available(ExportFormat::Mp3)) return;
+    namespace fs = std::filesystem;
+    const auto path = fs::temp_directory_path() / "sanity-96k.mp3";
+    AudioBuffer a = AudioBuffer::zeros(96000, 2, 96000 * 2);
+    for (std::size_t i = 0; i < a.frames(); i++)
+        a.data[2 * i] = static_cast<float>(0.4 * std::sin(kTwoPi * 440 * i / 96000.0));  // right stays silent
+    ExportOptions o;
+    o.format = ExportFormat::Mp3;
+    std::string err;
+    CHECK(encode_audio(path.string(), a, o, err));
+#if SANITY_HAVE_SNDFILE
+    SF_INFO info{};
+    auto* f = sf_open(path.string().c_str(), SFM_READ, &info);
+    CHECK(f != nullptr);
+    if (f) {
+        CHECK(info.channels == 2);
+        CHECK(info.samplerate == 48000);
+        std::vector<float> d(static_cast<std::size_t>(info.frames) * 2);
+        const auto n = sf_readf_float(f, d.data(), info.frames);
+        sf_close(f);
+        double l = 0, r = 0;
+        for (sf_count_t i = 0; i < n; i++) { l += d[2 * i] * d[2 * i]; r += d[2 * i + 1] * d[2 * i + 1]; }
+        CHECK(l > 100);
+        CHECK(r < l * 0.001);
+    }
+#endif
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TT_CASE("wav 24 bit is written as 24 bit even without libsndfile") {
+    namespace fs = std::filesystem;
+    const auto path = fs::temp_directory_path() / "sanity-24.wav";
+    AudioBuffer a = AudioBuffer::zeros(48000, 1, 1000);
+    for (std::size_t i = 0; i < a.frames(); i++) a.data[i] = static_cast<float>(std::sin(i * 0.05) * 0.7);
+    std::string err;
+    CHECK(wav_write_pcm24(path.string(), a, &err));
+    AudioBuffer b;
+    CHECK(wav_read(path.string(), b, err));
+    CHECK(b.frames() == a.frames());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < b.data.size(); i++)
+        worst = std::max(worst, std::fabs(static_cast<double>(b.data[i] - a.data[i])));
+    CHECK_LE(worst, 1.0 / 8388607.0 + 1e-7);
+    std::error_code ec;
+    fs::remove(path, ec);
 }
 
 namespace {
