@@ -7,6 +7,8 @@
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
 #include <QShortcut>
@@ -49,6 +51,30 @@ QString cache_dir() {
 
 QString live_pcm_path() { return cache_dir() + "/recording-live.pcm"; }
 QString live_meta_path() { return cache_dir() + "/recording-live.json"; }
+
+// Reads the crash-safe take with the format recorded next to it. Falls back
+// to 48 kHz mono for takes written before the metadata existed.
+bool read_live_take(sanity::AudioBuffer& b) {
+    int rate = 48000, ch = 1;
+    QFile meta(live_meta_path());
+    if (meta.open(QIODevice::ReadOnly)) {
+        const QJsonObject o = QJsonDocument::fromJson(meta.readAll()).object();
+        rate = o.value("sample_rate").toInt(48000);
+        ch = std::clamp(o.value("channels").toInt(1), 1, 2);
+    }
+    QFile f(live_pcm_path());
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QByteArray pcm = f.readAll();
+    const int frames = pcm.size() / (2 * ch);
+    if (frames <= 0) return false;
+    b.sample_rate = rate;
+    b.channels = ch;
+    b.data.resize(static_cast<std::size_t>(frames) * static_cast<std::size_t>(ch));
+    const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
+    for (int i = 0; i < frames * ch; i++)
+        b.data[static_cast<std::size_t>(i)] = static_cast<float>(p[i] / 32768.0);
+    return true;
+}
 
 }  // namespace
 
@@ -216,18 +242,8 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
     rhl->addWidget(recovery_, 1);
     auto* rec_btn = new QPushButton(QStringLiteral("Recupera"));
     connect(rec_btn, &QPushButton::clicked, this, [this] {
-        QFile f(live_pcm_path());
-        if (!f.open(QIODevice::ReadOnly)) return;
-        const QByteArray pcm = f.readAll();
-        const int rate = 48000, ch = 1;
         sanity::AudioBuffer b;
-        b.sample_rate = rate;
-        b.channels = ch;
-        const int n = pcm.size() / 2;
-        const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
-        b.data.resize(static_cast<std::size_t>(n));
-        for (int i = 0; i < n; i++) b.data[static_cast<std::size_t>(i)] =
-            static_cast<float>(p[i] / 32768.0);
+        if (!read_live_take(b)) return;
         AppState::get().set_audio(b, QString(), QStringLiteral("recupero"));
         emit recording_ready();
     });
@@ -337,6 +353,9 @@ void RecordPage::start_recording() {
         return;
     }
 
+    live_rate_ = capture_->sample_rate();
+    live_channels_ = capture_->channels();
+
     // Crash-safe writer: the header is written first so a truncated file is
     // still interpretable, then raw PCM is appended as it arrives.
     {
@@ -346,7 +365,9 @@ void RecordPage::start_recording() {
                                      "{\n  \"sample_rate\": %1,\n  \"channels\": %2,\n"
                                      "  \"started\": \"%3\",\n  \"format\": \"s16le\",\n"
                                      "  \"pcm\": \"recording-live.pcm\"\n}\n")
-                                     .arg(rate).arg(ch).arg(QDateTime::currentDateTime().toString(Qt::ISODate));
+                                     .arg(live_rate_)
+                                     .arg(live_channels_)
+                                     .arg(QDateTime::currentDateTime().toString(Qt::ISODate));
             meta.write(json.toUtf8());
         }
         QFile::remove(live_pcm_path());
@@ -356,7 +377,7 @@ void RecordPage::start_recording() {
     paused_ = false;
     elapsed_ = 0.0;
     last_paint_ = -1.0;
-    sample_rate_of_live_ = rate;
+    sample_rate_of_live_ = live_rate_;
     live_display_.clear();
     marker_times_.clear();
     marker_labels_.clear();
@@ -397,26 +418,13 @@ void RecordPage::stop_recording() {
         capture_ = nullptr;
     }
     // Read back the crash-safe file and hand it to the session.
-    QFile f(live_pcm_path());
-    if (f.open(QIODevice::ReadOnly)) {
-        const QByteArray pcm = f.readAll();
-        const int rate = rate_->currentData().toInt();
-        const int ch = channels_->currentData().toInt();
-        const int frames = pcm.size() / (2 * ch);
-        sanity::AudioBuffer b;
-        b.sample_rate = rate;
-        b.channels = ch;
-        b.data.resize(static_cast<std::size_t>(frames) * static_cast<std::size_t>(ch));
-        const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
-        for (int i = 0; i < frames * ch; i++)
-            b.data[static_cast<std::size_t>(i)] = static_cast<float>(p[i] / 32768.0);
-        if (!b.data.empty()) {
-            AppState::get().set_audio(b, QString(), QStringLiteral("microphone"));
-            AppState::get().session().name =
-                QStringLiteral("Registrazione %1")
-                    .arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
-            emit recording_ready();
-        }
+    sanity::AudioBuffer b;
+    if (read_live_take(b)) {
+        AppState::get().set_audio(b, QString(), QStringLiteral("microphone"));
+        AppState::get().session().name =
+            QStringLiteral("Registrazione %1")
+                .arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
+        emit recording_ready();
     }
     rec_->setEnabled(true);
     pause_->setEnabled(false);
@@ -457,7 +465,7 @@ void RecordPage::on_chunk(const QByteArray& pcm) {
     if (f.open(QIODevice::Append)) f.write(pcm);
 
     // Update the rolling display buffer.
-    const int ch = channels_->currentData().toInt();
+    const int ch = live_channels_;
     const int n = pcm.size() / 2;
     const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
     live_display_.reserve(live_display_.size() + static_cast<std::size_t>(n / ch + 1));

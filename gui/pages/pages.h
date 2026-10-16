@@ -110,6 +110,8 @@ private:
     double last_mic_test_db_ = -200.0;
     std::vector<float> live_display_;   // rolling window shown in the waveform
     int sample_rate_of_live_ = 48000;
+    int live_rate_ = 48000;      // rate the device actually delivered
+    int live_channels_ = 1;      // channels the device actually delivered
     double last_paint_ = -1.0;
 
     class Capture* capture_ = nullptr;
