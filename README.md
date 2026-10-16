@@ -95,6 +95,9 @@ The renderer exits **3** when the result is not conformant.
 
 ## Documentation
 
+* [`docs/manuale-utente.html`](docs/manuale-utente.html) — Italian user manual:
+  open locally in a browser for step-by-step workflows, control explanations,
+  practical settings, troubleshooting and a glossary. Works offline.
 * [`docs/DESIGN-podcast-sanity.md`](docs/DESIGN-podcast-sanity.md) — architecture,
   the stage chain and why it is ordered that way, the GUI, packaging, limits.
 * [`docs/STANDARDS.md`](docs/STANDARDS.md) — what is measured, the delivery
