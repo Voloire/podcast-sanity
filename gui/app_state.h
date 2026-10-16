@@ -64,6 +64,7 @@ public:
     // ---- working audio -------------------------------------------------
     void set_audio(const sanity::AudioBuffer& b, const QString& path, const QString& kind);
     void clear_audio();
+    bool open_audio_file(const QString& path, QString* error);
     void set_mastered(const sanity::AudioBuffer& b, const sanity::Report& r);
     void set_params(const sanity::Params& p);
     bool set_music(const QString& path, QString* error);

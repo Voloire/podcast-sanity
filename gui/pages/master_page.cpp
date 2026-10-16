@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSlider>
@@ -26,6 +27,7 @@
 #include "sanity/music_bed.hpp"
 #include "theme.h"
 #include "widgets.h"
+#include "studio_widgets.h"
 
 #if SANITY_HAVE_QTMM
 #include <QAudioOutput>
@@ -59,10 +61,14 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     {
         auto* load = new QPushButton(QStringLiteral("Carica file audio..."));
         connect(load, &QPushButton::clicked, this, [this] {
-            // The file dialog lives in the main window; ask it through the
-            // status bar for a single entry point.
-            AppState::get().status_message(
-                QStringLiteral("Usa File > Apri per caricare un audio"));
+            const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Apri un audio"),
+                QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+                QString::fromStdString(sanity::audio_read_filter()));
+            if (path.isEmpty()) return;
+            QString error;
+            if (!AppState::get().open_audio_file(path, &error))
+                QMessageBox::warning(this, QStringLiteral("Apri"),
+                    QStringLiteral("Impossibile leggere il file:\n%1").arg(error));
         });
         auto* info = new QLabel();
         info->setObjectName("Mono");
@@ -301,7 +307,20 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     // -------------------------------------------------------------- result
     result_card_ = new Card(QStringLiteral("Risultato"),
                             QStringLiteral("Confronto prima e dopo, con lo stato di conformita."));
+    result_card_->setObjectName("MasterResultCard");
     {
+        auto* meters = new QWidget();
+        auto* row = new QHBoxLayout(meters);
+        row->setContentsMargins(0, 0, 0, 0);
+        lufs_before_ = new VuMeter(QStringLiteral("Loudness prima"));
+        lufs_after_ = new VuMeter(QStringLiteral("Loudness dopo"));
+        for (auto* meter : {lufs_before_, lufs_after_}) {
+            meter->set_scale(-30, -10, QStringLiteral("LUFS"));
+            meter->set_reference(0.0);
+            meter->set_ticks({-30, -27, -24, -21, -19, -16, -14, -12, -10});
+            row->addWidget(meter);
+        }
+        result_card_->add_widget(meters);
         auto* tiles = new QGridLayout();
         tiles->setHorizontalSpacing(10);
         tiles->setVerticalSpacing(10);
@@ -420,6 +439,7 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
     connect(&AppState::get(), &AppState::audio_changed, this, &MasterPage::refresh_from_state);
     connect(&AppState::get(), &AppState::music_changed, this, &MasterPage::refresh_music);
     connect(&AppState::get(), &AppState::params_changed, this, [this] {
+        ++candidates_generation_;
         load_params(AppState::get().session().params);
     });
     load_params(AppState::get().default_params());
@@ -428,6 +448,7 @@ MasterPage::MasterPage(QWidget* parent) : QWidget(parent) {
 
 MasterPage::~MasterPage() {
     if (music_thread_) music_thread_->wait();
+    if (candidates_thread_) candidates_thread_->wait();
 }
 
 void MasterPage::load_params(const sanity::Params& p) {
@@ -499,6 +520,10 @@ void MasterPage::process() {
 }
 
 void MasterPage::refresh_from_state() {
+    ++candidates_generation_;
+    candidates_->setRowCount(0);
+    lufs_before_->reset();
+    lufs_after_->reset();
     refresh_music();
     const Session& s = AppState::get().session();
     if (s.has_audio) {
@@ -536,8 +561,12 @@ void MasterPage::show_report() {
     tile_fillers_->set_value(QString::number(r.fillers_removed));
     tile_time_->set_value(fmt_ms(r.total_ms));
 
-    const double target = 0.0;
-    (void)target;
+    const double target = r.params.target_lufs == 0.0 ? (r.after.channels > 1 ? -16.0 : -19.0)
+                                                     : r.params.target_lufs;
+    lufs_before_->set_value_dbfs(r.before.integrated_lufs);
+    lufs_after_->set_value_dbfs(r.after.integrated_lufs);
+    lufs_before_->set_target(target);
+    lufs_after_->set_target(target);
     tile_lufs_after_->set_state(r.conformant_loudness ? State::Ready : State::Warning);
     tile_tp_after_->set_state(r.conformant_true_peak ? State::Ready : State::Warning);
 
@@ -590,31 +619,60 @@ void MasterPage::build_stage_table() {
 }
 
 void MasterPage::show_candidates() {
+    if (candidates_thread_) return;
     const Session& s = AppState::get().session();
     if (!s.has_audio) {
         candidates_->setRowCount(0);
         return;
     }
-    std::vector<FillerCandidate> cands;
     const auto mode = static_cast<sanity::FillerMode>(filler_->currentData().toInt());
-    const std::vector<float> mono = sanity::to_mono(s.audio);
-    if (mode != sanity::FillerMode::Off)
-        sanity::detect_fillers(mono, s.audio.sample_rate, mode, &cands);
-    std::sort(cands.begin(), cands.end(),
-              [](const FillerCandidate& a, const FillerCandidate& b) { return a.score > b.score; });
-    candidates_->setRowCount(static_cast<int>(cands.size()));
-    for (int i = 0; i < static_cast<int>(cands.size()); i++) {
-        const FillerCandidate& c = cands[i];
-        candidates_->setItem(i, 0, new QTableWidgetItem(
-                                       fmt_seconds(c.start / static_cast<double>(s.audio.sample_rate))));
-        candidates_->setItem(i, 1, new QTableWidgetItem(fmt_ms(c.duration_ms)));
-        candidates_->setItem(i, 2, new QTableWidgetItem(QString::number(c.score, 'f', 3)));
-        candidates_->setItem(i, 3, new QTableWidgetItem(c.removed ? QStringLiteral("Rimosso")
-                                                                 : QStringLiteral("Mantenuto")));
-    }
-    candidates_->resizeColumnsToContents();
-    filler_card_->set_state(State::Ready,
-                            QStringLiteral("%1 candidati").arg(cands.size()));
+    const int generation = ++candidates_generation_;
+    candidates_btn_->setEnabled(false);
+    filler_card_->set_state(State::Busy, QStringLiteral("Analisi"));
+    auto* worker = QThread::create([this, audio = s.audio, mode, generation] {
+        std::vector<FillerCandidate> cands;
+        QString error;
+        try {
+            if (mode != sanity::FillerMode::Off)
+                sanity::detect_fillers(sanity::to_mono(audio), audio.sample_rate, mode, &cands);
+            std::sort(cands.begin(), cands.end(),
+                [](const FillerCandidate& a, const FillerCandidate& b) { return a.score > b.score; });
+        } catch (const std::exception& e) {
+            error = QString::fromUtf8(e.what());
+        } catch (...) {
+            error = QStringLiteral("Analisi non riuscita");
+        }
+        QMetaObject::invokeMethod(this, [this, cands = std::move(cands), fs = audio.sample_rate, generation, error] {
+            if (generation != candidates_generation_) {
+                filler_card_->set_state(State::Idle, QStringLiteral("Da aggiornare"));
+                return;
+            }
+            if (!error.isEmpty()) {
+                filler_card_->set_state(State::Error, QStringLiteral("Errore"));
+                AppState::get().status_message(error);
+                return;
+            }
+            candidates_->setRowCount(static_cast<int>(cands.size()));
+            for (int i = 0; i < static_cast<int>(cands.size()); i++) {
+                const FillerCandidate& c = cands[i];
+                candidates_->setItem(i, 0, new QTableWidgetItem(fmt_seconds(c.start / static_cast<double>(fs))));
+                candidates_->setItem(i, 1, new QTableWidgetItem(fmt_ms(c.duration_ms)));
+                candidates_->setItem(i, 2, new QTableWidgetItem(QString::number(c.score, 'f', 3)));
+                candidates_->setItem(i, 3, new QTableWidgetItem(c.removed ? QStringLiteral("Rimosso")
+                                                                       : QStringLiteral("Mantenuto")));
+            }
+            candidates_->resizeColumnsToContents();
+            filler_card_->set_state(State::Ready, QStringLiteral("%1 candidati").arg(cands.size()));
+        }, Qt::QueuedConnection);
+    });
+    candidates_thread_ = worker;
+    worker->setParent(this);
+    connect(worker, &QThread::finished, this, [this] {
+        candidates_thread_ = nullptr;
+        candidates_btn_->setEnabled(true);
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
 }
 
 void MasterPage::play(const QString& which) {

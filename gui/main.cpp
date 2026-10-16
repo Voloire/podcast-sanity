@@ -170,13 +170,13 @@ private:
     // The page list is static so the deferred callbacks never hold a pointer to
     // a stack array that has already gone out of scope.
     static const int* after_pages() {
-        static const int pages[] = {1, 2, 4, 6};
+        static const int pages[] = {1, 1, 2, 4, 6};
         return pages;
     }
 
     void capture_after(int i) {
         const int* pages = after_pages();
-        if (i >= 4) {
+        if (i >= 5) {
             if (!shots_.isEmpty()) {
                 QDir(shots_).mkpath(QStringLiteral("themes"));
                 window_->select_page(0);
@@ -198,7 +198,8 @@ private:
         const int page = pages[i];
         window_->select_page(page);
         if (page == 1) {
-            auto* card = window_->findChild<QWidget*>(QStringLiteral("MusicBedCard"));
+            auto* card = window_->findChild<QWidget*>(i == 0 ? QStringLiteral("MusicBedCard")
+                                                            : QStringLiteral("MasterResultCard"));
             for (QWidget* parent = card ? card->parentWidget() : nullptr; parent; parent = parent->parentWidget()) {
                 if (auto* scroll = qobject_cast<QScrollArea*>(parent)) {
                     scroll->ensureWidgetVisible(card);
@@ -207,7 +208,7 @@ private:
             }
         }
         QTimer::singleShot(320, [this, i, page] {
-            grab(page, QStringLiteral("mastered"));
+            grab(page, i == 0 ? QStringLiteral("music") : QStringLiteral("mastered"));
             capture_after(i + 1);
         });
     }

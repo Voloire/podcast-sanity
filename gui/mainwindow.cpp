@@ -26,19 +26,19 @@ namespace gui {
 
 namespace {
 struct NavEntry {
-    const char* glyph;
+    NavIcon icon;
     const char* label;
 };
 // Order matches the mockup: capture, mastering, standards, library, export,
 // settings, diagnostics.
 const NavEntry kNav[] = {
-    {"[ * ]", "Registrazione"},
-    {"[ ~ ]", "Sanity Master"},
-    {"[ = ]", "Standard & Loudness"},
-    {"[ # ]", "Libreria / Sessioni"},
-    {"[ > ]", "Esporta & Pubblica"},
-    {"[ + ]", "Impostazioni"},
-    {"[ ? ]", "Diagnostica & Test"},
+    {NavIcon::Mic, "Registrazione"},
+    {NavIcon::Sliders, "Sanity Master"},
+    {NavIcon::Gauge, "Standard & Loudness"},
+    {NavIcon::Library, "Libreria / Sessioni"},
+    {NavIcon::Upload, "Esporta & Pubblica"},
+    {NavIcon::Gear, "Impostazioni"},
+    {NavIcon::Stethoscope, "Diagnostica & Test"},
 };
 }  // namespace
 
@@ -136,7 +136,7 @@ void MainWindow::build_sidebar() {
     nav_layout_ = v;
     nav_buttons_.clear();
     for (int i = 0; i < static_cast<int>(std::size(kNav)); i++) {
-        auto* b = new NavButton(QString::fromUtf8(kNav[i].glyph),
+        auto* b = new NavButton(kNav[i].icon,
                                 QString::fromUtf8(kNav[i].label), side);
         connect(b, &QPushButton::clicked, this, [this, i] { select_page(i); });
         v->addWidget(b);
@@ -213,18 +213,15 @@ void MainWindow::open_audio() {
         QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
         QString::fromStdString(sanity::audio_read_filter()));
     if (path.isEmpty()) return;
-    sanity::AudioBuffer b;
-    std::string err;
-    if (!sanity::audio_read(path.toStdString(), b, err)) {
+    QString err;
+    if (!AppState::get().open_audio_file(path, &err)) {
         QMessageBox::warning(this, QStringLiteral("Apri"),
                              QStringLiteral("Impossibile leggere il file:\n%1")
-                                 .arg(QString::fromStdString(err)));
+                                 .arg(err));
         return;
     }
-    AppState::get().set_audio(b, path, QStringLiteral("file"));
-    AppState::get().session().name = QFileInfo(path).completeBaseName();
     subtitle_->setText(QStringLiteral("%1 - %2")
-                           .arg(AppState::get().session().name, describe_audio(b)));
+                           .arg(AppState::get().session().name, describe_audio(AppState::get().session().audio)));
     select_page(1);
 }
 

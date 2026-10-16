@@ -75,6 +75,7 @@ void TransportButton::paintEvent(QPaintEvent* e) {
 
 namespace {
 constexpr int kEnvelopeBuckets = 2400;  // fixed so painting stays cheap
+constexpr double kPi = 3.14159265358979323846;
 }
 
 // --------------------------------------------------------------------- chip
@@ -445,13 +446,75 @@ void WaveformView::paintEvent(QPaintEvent*) {
 }
 
 // -------------------------------------------------------------- nav button
-NavButton::NavButton(const QString& glyph, const QString& text, QWidget* parent)
-    : QPushButton(parent) {
+NavButton::NavButton(NavIcon icon, const QString& text, QWidget* parent)
+    : QPushButton(parent), icon_(icon) {
     setObjectName("Nav");
     setCheckable(true);
     setCursor(Qt::PointingHandCursor);
-    setText(QStringLiteral("  %1   %2").arg(glyph, text));
-    setMinimumHeight(36);
+    setText(text);
+    setMinimumHeight(38);
+}
+
+void NavButton::paintEvent(QPaintEvent* e) {
+    QPushButton::paintEvent(e);
+    const Tokens& t = tokens();
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const QColor ink = isChecked() ? t.accent : t.text_dim;
+    p.setPen(QPen(ink, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    const QRectF b(14, height() / 2.0 - 9, 18, 18);
+    switch (icon_) {
+        case NavIcon::Mic:
+            p.drawRoundedRect(QRectF(b.center().x() - 3.5, b.top(), 7, 11), 3.5, 3.5);
+            p.drawArc(QRectF(b.center().x() - 6.5, b.top() + 4, 13, 11), 180 * 16, 180 * 16);
+            p.drawLine(QPointF(b.center().x(), b.top() + 15), QPointF(b.center().x(), b.bottom()));
+            break;
+        case NavIcon::Sliders:
+            for (int i = 0; i < 3; i++) {
+                const double y = b.top() + 3 + i * 6;
+                p.drawLine(QPointF(b.left(), y), QPointF(b.right(), y));
+                const double x = b.left() + (i == 1 ? 12 : (i == 0 ? 5 : 9));
+                p.setBrush(ink);
+                p.drawEllipse(QPointF(x, y), 2.2, 2.2);
+                p.setBrush(Qt::NoBrush);
+            }
+            break;
+        case NavIcon::Gauge:
+            p.drawArc(b.adjusted(1, 3, -1, 1), 20 * 16, 140 * 16);
+            p.drawLine(b.center() + QPointF(0, 2), b.center() + QPointF(5, -4));
+            p.setBrush(ink);
+            p.drawEllipse(b.center() + QPointF(0, 2), 1.6, 1.6);
+            break;
+        case NavIcon::Library:
+            p.drawRoundedRect(QRectF(b.left() + 1, b.top() + 2, 4, 14), 1, 1);
+            p.drawRoundedRect(QRectF(b.left() + 7, b.top() + 2, 4, 14), 1, 1);
+            p.drawLine(QPointF(b.left() + 13, b.top() + 3), QPointF(b.right(), b.bottom() - 1));
+            break;
+        case NavIcon::Upload:
+            p.drawLine(QPointF(b.center().x(), b.top() + 1), QPointF(b.center().x(), b.bottom() - 5));
+            p.drawPolyline(QPolygonF() << QPointF(b.center().x() - 5, b.top() + 6) << QPointF(b.center().x(), b.top() + 1)
+                                       << QPointF(b.center().x() + 5, b.top() + 6));
+            p.drawPolyline(QPolygonF() << QPointF(b.left(), b.bottom() - 5) << QPointF(b.left(), b.bottom())
+                                       << QPointF(b.right(), b.bottom()) << QPointF(b.right(), b.bottom() - 5));
+            break;
+        case NavIcon::Gear:
+            for (int i = 0; i < 8; i++) {
+                const double a = i * kPi / 4.0;
+                p.drawLine(b.center() + QPointF(6 * std::cos(a), 6 * std::sin(a)),
+                           b.center() + QPointF(8.5 * std::cos(a), 8.5 * std::sin(a)));
+            }
+            p.drawEllipse(b.center(), 5.5, 5.5);
+            p.drawEllipse(b.center(), 2.0, 2.0);
+            break;
+        case NavIcon::Stethoscope:
+            p.drawArc(QRectF(b.left() + 1, b.top() + 1, 10, 12), 180 * 16, 180 * 16);
+            p.drawLine(QPointF(b.left() + 1, b.top() + 1), QPointF(b.left() + 1, b.top() + 7));
+            p.drawLine(QPointF(b.left() + 11, b.top() + 1), QPointF(b.left() + 11, b.top() + 7));
+            p.drawLine(QPointF(b.left() + 6, b.top() + 13), QPointF(b.left() + 6, b.bottom() - 2));
+            p.drawEllipse(QPointF(b.right() - 2, b.bottom() - 2), 2.2, 2.2);
+            break;
+    }
 }
 
 // ------------------------------------------------------------- misc helpers

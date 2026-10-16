@@ -165,10 +165,15 @@ private:
 };
 
 // --------------------------------------------------------------- nav button
+enum class NavIcon { Mic, Sliders, Gauge, Library, Upload, Gear, Stethoscope };
 class NavButton : public QPushButton {
     Q_OBJECT
 public:
-    NavButton(const QString& glyph, const QString& text, QWidget* parent = nullptr);
+    NavButton(NavIcon icon, const QString& text, QWidget* parent = nullptr);
+protected:
+    void paintEvent(QPaintEvent*) override;
+private:
+    NavIcon icon_;
 };
 
 // ------------------------------------------------------------- misc helpers

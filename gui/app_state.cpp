@@ -204,6 +204,18 @@ void AppState::set_params(const sanity::Params& p) {
     emit params_changed();
 }
 
+bool AppState::open_audio_file(const QString& path, QString* error) {
+    sanity::AudioBuffer b;
+    std::string err;
+    if (!sanity::audio_read(path.toStdString(), b, err)) {
+        if (error) *error = QString::fromStdString(err);
+        return false;
+    }
+    session_.name = QFileInfo(path).completeBaseName();
+    set_audio(b, path, QStringLiteral("file"));
+    return true;
+}
+
 bool AppState::set_music(const QString& path, QString* error) {
     auto music = std::make_shared<sanity::AudioBuffer>();
     std::string err;

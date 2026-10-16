@@ -162,6 +162,10 @@ private:
     QPushButton* music_preview_ = nullptr;
     QPushButton* music_preview_stop_ = nullptr;
     QThread* music_thread_ = nullptr;
+    QThread* candidates_thread_ = nullptr;
+    int candidates_generation_ = 0;
+    VuMeter* lufs_before_ = nullptr;
+    VuMeter* lufs_after_ = nullptr;
     QMediaPlayer* player_ = nullptr;
     bool loading_params_ = true;
     int preview_generation_ = 0;

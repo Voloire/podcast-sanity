@@ -306,7 +306,8 @@ QFrame#CardHeader {
     border: none; border-bottom: 1px solid %6;
     border-top-left-radius: 12px; border-top-right-radius: 12px;
 }
-QPushButton#Nav:checked { background: %8; color: %3; font-weight: 600; border-left: 3px solid %10; padding-left: 9px; }
+QPushButton#Nav { padding-left: 42px; }
+QPushButton#Nav:checked { background: %8; color: %3; font-weight: 600; border-left: 3px solid %10; padding-left: 39px; }
 QLabel#PageTitle { font-size: 24px; font-weight: 700; letter-spacing: 0.5px; background: transparent; }
 QLabel#BrandTitle { font-size: 17px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; background: transparent; }
 QLabel#Mono, QPlainTextEdit, QTextEdit { font-family: "%9"; }
