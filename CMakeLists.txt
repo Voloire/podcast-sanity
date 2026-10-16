@@ -265,6 +265,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
 endif()
 
 if(WIN32)
+  # CPack's WiX generator accepts only a .txt or .rtf license file, while the
+  # project ships a plain extensionless LICENSE. Hand it a text copy instead of
+  # keeping a second, drifting copy in the repository.
+  set(SANITY_WIX_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${SANITY_WIX_LICENSE}" COPYONLY)
+  set(CPACK_RESOURCE_FILE_LICENSE "${SANITY_WIX_LICENSE}")
   set(CPACK_GENERATOR "WIX;ZIP")
 else()
   set(CPACK_GENERATOR "DEB;TGZ")
