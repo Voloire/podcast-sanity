@@ -131,6 +131,10 @@ set_tests_properties(e2e PROPERTIES TIMEOUT 900)
 add_test(NAME e2e_44k COMMAND sanity_e2e_tests --rate 44100)
 set_tests_properties(e2e_44k PROPERTIES TIMEOUT 900)
 
+add_test(NAME e2e_30s COMMAND sanity_e2e_tests --seconds 30)
+add_test(NAME e2e_45s COMMAND sanity_e2e_tests --seconds 45)
+set_tests_properties(e2e_30s e2e_45s PROPERTIES TIMEOUT 900)
+
 # ---- GUI ------------------------------------------------------------------
 if(SANITY_WITH_GUI)
   # Multimedia is optional: without it the app still records from a file or the

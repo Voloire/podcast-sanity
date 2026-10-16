@@ -456,13 +456,16 @@ TT_CASE("wav round trip is bit exact for float32") {
     std::uniform_real_distribution<float> d(-0.9f, 0.9f);
     for (auto& v : b.data) v = d(rng);
     std::string err;
-    CHECK(wav_write("/tmp/sanity_rt.wav", b, true, &err));
+    const std::string path = (std::filesystem::temp_directory_path() / "sanity_rt.wav").string();
+    CHECK(wav_write(path, b, true, &err));
     AudioBuffer c;
-    CHECK(wav_read("/tmp/sanity_rt.wav", c, err));
+    CHECK(wav_read(path, c, err));
     CHECK(c.sample_rate == 48000);
     CHECK(c.channels == 2);
     CHECK(c.frames() == b.frames());
     CHECK(c.data == b.data);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 TT_CASE("wav round trip works for 16 bit") {
@@ -470,14 +473,17 @@ TT_CASE("wav round trip works for 16 bit") {
     for (std::size_t i = 0; i < b.data.size(); i++)
         b.data[i] = static_cast<float>(std::sin(i * 0.1) * 0.5);
     std::string err;
-    CHECK(wav_write("/tmp/sanity_rt16.wav", b, false, &err));
+    const std::string path = (std::filesystem::temp_directory_path() / "sanity_rt16.wav").string();
+    CHECK(wav_write(path, b, false, &err));
     AudioBuffer c;
-    CHECK(wav_read("/tmp/sanity_rt16.wav", c, err));
+    CHECK(wav_read(path, c, err));
     CHECK(c.sample_rate == 44100);
     double err_max = 0.0;
     for (std::size_t i = 0; i < c.data.size(); i++)
         err_max = std::max(err_max, std::fabs(static_cast<double>(c.data[i] - b.data[i])));
     CHECK_LE(err_max, 1.0 / 32767.0 + 1e-6);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 // ------------------------------------------------------------------ segments

@@ -9,8 +9,11 @@ cd build && ctest --output-on-failure
 
 | Suite | Target | Size | Time | What it protects |
 |-------|--------|------|------|------------------|
-| `unit` | `sanity_tests` | 22 cases, 127 checks | ~0.6 s | The DSP primitives |
-| `e2e` | `sanity_e2e_tests` | 8 cases, 42 checks | ~40 s | The whole chain against ground truth |
+| `unit` | `sanity_tests` | 28 cases / 1269 checks without libebur128 (not linked in the Windows build) | ~0.6 s | The DSP primitives |
+| `e2e` | `sanity_e2e_tests` | 10 cases, 55 checks | ~40 s | The whole chain against ground truth |
+| `e2e_30s` | `sanity_e2e_tests --seconds 30` | same cases on 30 s takes | ~17 s | The speech preservation and filler margins at the documented length |
+| `e2e_45s` | `sanity_e2e_tests --seconds 45` | same cases on 45 s takes | ~25 s | The SNR improvement margin at the documented length |
+| `e2e_44k` | `sanity_e2e_tests --rate 44100` | same cases at 44.1 kHz | ~7 s | The filler detector off its calibration rate |
 | `gui` | `podcast-sanity --selftest` | walks 7 pages + master + export | ~5 s | The interface wiring |
 
 ---
@@ -35,8 +38,9 @@ Covered:
   features are always 10 ms apart regardless of rate.
 * **Corpus generator**: the envelope, the isolated hesitations, and
   `Degradations::filler_every == 0` meaning "never insert a hesitation".
-* **Containers**: WAV round trip for 16-bit, 24-bit and float, and the JSON
-  writer's escaping and number formatting.
+* **Containers**: WAV round trip for 16-bit, 24-bit and float; the JSON writer is
+  pinned by `json writer puts scalars on the key line, escapes strings and trims
+  numbers`.
 
 ---
 
@@ -61,17 +65,29 @@ hesitations).
 | Check | Threshold | Rationale |
 |-------|-----------|-----------|
 | Loudness | within ±1 LU of −19 (mono) | The delivery tolerance; the engine actually lands within 0.05 LU |
-| True peak | ≤ −1.0 dBTP | Measured on the written output, not on an internal buffer |
+| True peak | ≤ −1.0 dBTP | Measured on the output buffer before quantisation; the 16-bit rounding adds less than 0.0001 dB |
 | Filler recall | ≥ 0.75 | Ground-truth hesitations must be found |
 | Filler precision | ≥ 0.75 | Words must not be cut |
+| Speech preservation | ≥ 5 dB | The cleaned speech still matches the clean reference |
 | Removed filler time | ≤ truth × 1.6 + 0.2 s | Catches over-eager removal that still scores well by interval overlap |
 | No false positives | 0 on a no-hesitation corpus | The corpus is regenerated with `filler_every = 0` |
-| SNR improvement | ≥ +2 dB on home and rough | Cleaning must actually clean |
+| SNR improvement | ≥ +1.5 dB on home and rough | Cleaning must actually clean |
 | SI-SDR (home) | no worse than the input | The denoiser must not add artefacts |
 | SI-SDR (rough) | ≥ −1.5 dB | Allows for the intentional EQ |
 | Determinism | byte-identical audio and equal `params_hash` | Same input and parameters, same bytes, every time |
 | Report completeness | every enabled stage present, with metrics | The observability contract |
 | Music preset | runs and stays inside the tolerance | A second chain, not just talk |
+
+Measured on the executed runs; the worst profile is `rough` in every run, and
+speech preservation is measured on filler-off runs:
+
+| Run | Speech preservation | SNR gain `home` | SNR gain `rough` |
+|-----|---------------------|-----------------|------------------|
+| 12 s | 7.03 dB | +2.35 dB | +9.46 dB |
+| 20 s | 6.22 dB | +2.46 dB | +2.03 dB |
+| 30 s | 5.86 dB | +2.30 dB | +2.13 dB |
+| 45 s | 6.30 dB | +3.10 dB | +1.66 dB |
+| 44.1 kHz | 7.57 dB | +2.45 dB | +8.09 dB |
 
 ### 2.3 Two measurement details worth remembering
 

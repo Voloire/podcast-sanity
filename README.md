@@ -94,8 +94,9 @@ The renderer exits **3** when the result is not conformant.
 
 ## Verified, not asserted
 
-* 22 unit cases / 127 checks over the DSP primitives.
-* An 8-case / 42-check end-to-end harness that generates synthetic episodes with
+* 28 unit cases / 1269 checks over the DSP primitives (without the libebur128
+  cross-check, which the Windows build does not link).
+* A 10-case / 55-check end-to-end harness that generates synthetic episodes with
   ground truth, masters them and judges loudness, true peak, filler precision and
   recall, SNR, SI-SDR, determinism and report completeness.
 * A GUI self test that walks all seven pages, masters, exports an MP3 and checks

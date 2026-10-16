@@ -263,8 +263,7 @@ Device hot-plug and a full guided level-calibration wizard are wired at the
   Dependencies are generated with `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` and pinned to
   the Qt6, LAME and libsndfile runtime packages.
 * **Windows**: a fixed `CPACK_WIX_UPGRADE_GUID` makes upgrades replace the
-  previous install rather than stack beside it. The WiX patch file adds the Qt
-  runtime and codec DLLs to the MSI.
+  previous install rather than stack beside it.
 * Both are driven from the same `CMakeLists.txt`; `CPACK_GENERATOR` selects
   `DEB;TGZ` on Linux and `WIX;ZIP` on Windows.
 
@@ -272,7 +271,7 @@ Device hot-plug and a full guided level-calibration wizard are wired at the
 
 ## 6. What is verified, and how
 
-See `TESTING.md`. In short: 22 unit cases / 127 checks, an 8-case / 42-check
+See `TESTING.md`. In short: 28 unit cases / 1269 checks, a 10-case / 55-check
 end-to-end harness over synthetic episodes with ground truth, and a GUI self test
 that walks all seven pages, masters, exports an MP3 and checks the report
 contract. All three run under `ctest`.
