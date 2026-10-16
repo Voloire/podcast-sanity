@@ -17,26 +17,25 @@ public:
     void end_array() { close(']'); }
 
     void key(const std::string& k) {
-        comma();
-        newline();
+        separator(true);
         out_ += quote(k);
         out_ += ": ";
         after_key_ = true;
     }
 
-    void value_string(const std::string& v) { comma(); newline(); out_ += quote(v); }
-    void value_double(double v) { comma(); newline(); out_ += number(v); }
-    void value_int(long long v) { comma(); newline(); out_ += std::to_string(v); }
-    void value_bool(bool v) { comma(); newline(); out_ += v ? "true" : "false"; }
-    void value_null() { comma(); newline(); out_ += "null"; }
+    void value_string(const std::string& v) { separator(true); out_ += quote(v); }
+    void value_double(double v) { separator(true); out_ += number(v); }
+    void value_int(long long v) { separator(true); out_ += std::to_string(v); }
+    void value_bool(bool v) { separator(true); out_ += v ? "true" : "false"; }
+    void value_null() { separator(true); out_ += "null"; }
 
     // Inline form used for arrays of numbers.
     void value_double_inline(double v) {
-        comma();
+        separator(false);
         out_ += number(v);
     }
 
-    void raw_value(const std::string& v) { comma(); newline(); out_ += v; }
+    void raw_value(const std::string& v) { separator(true); out_ += v; }
 
     void member(const std::string& k, const std::string& v) { key(k); value_string(v); }
     void member(const std::string& k, double v) { key(k); value_double(v); }
@@ -48,26 +47,36 @@ public:
 
 private:
     void open(char c) {
-        comma();
-        newline();
+        separator(true);
         out_ += c;
         stack_.push_back(true);
+        inline_.push_back(true);
         after_key_ = false;
     }
     void close(char c) {
         const bool empty = stack_.empty() || stack_.back();
-        stack_.pop_back();
-        if (!empty) newline();
+        // A container that only ever held inline values closes on its own line:
+        // "e": [1.0,2.25] stays one line, top level arrays of numbers too.
+        const bool inline_only = !inline_.empty() && inline_.back();
+        if (!stack_.empty()) stack_.pop_back();
+        if (!inline_.empty()) inline_.pop_back();
+        if (!empty && !inline_only) newline();
         out_ += c;
         after_key_ = false;
     }
-    void comma() {
+    // Emits the separator before a new item. After a key nothing is emitted:
+    // the value belongs on the same line as its key.
+    void separator(bool newline_ok) {
         if (after_key_) {
             after_key_ = false;
             return;
         }
         if (!stack_.empty() && !stack_.back()) out_ += ",";
         if (!stack_.empty()) stack_.back() = false;
+        if (newline_ok) {
+            if (!inline_.empty()) inline_.back() = false;
+            newline();
+        }
     }
     void newline() {
         if (indent_ <= 0) return;
@@ -80,6 +89,7 @@ private:
 
     std::string out_;
     std::vector<bool> stack_;
+    std::vector<bool> inline_;
     int indent_ = 2;
     bool after_key_ = false;
 };

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "sanity/dsp.hpp"
 #include "sanity/dynamics.hpp"
 #include "sanity/encode.hpp"
+#include "sanity/json.hpp"
 #include "sanity/loudness.hpp"
 #include "sanity/master.hpp"
 #include "tinytest.hpp"
@@ -535,6 +537,36 @@ TT_CASE("conformance reports the optional LRA and short term ceilings") {
     q.max_lra = 0.0;
     const Report r2 = master(from_mono(fs, x), q, out);
     CHECK(r2.conformant_lra);
+}
+
+TT_CASE("json writer puts scalars on the key line, escapes strings and trims numbers") {
+    JsonWriter j(2);
+    j.begin_object();
+    j.member("a", 1);
+    j.member("b", std::string("x\"y\n"));
+    j.member("c", 2.50);
+    j.member("d", true);
+    j.key("e");
+    j.begin_array();
+    j.value_double_inline(1.0);
+    j.value_double_inline(2.25);
+    j.end_array();
+    j.key("f");
+    j.begin_object();
+    j.end_object();
+    j.end_object();
+    const std::string want =
+        "\n{\n  \"a\": 1,\n  \"b\": \"x\\\"y\\n\",\n  \"c\": 2.5,\n  \"d\": true,\n"
+        "  \"e\": [1.0,2.25],\n  \"f\": {}\n}";
+    CHECK(j.str() == want);
+    if (j.str() != want) std::printf("got:\n%s\n", j.str().c_str());
+    JsonWriter n(2);
+    n.begin_array();
+    // MSVC rejects 1.0 / 0.0 as a constant expression (C2124); infinity is the
+    // same input to the writer, which must emit null for non-finite numbers.
+    n.value_double_inline(std::numeric_limits<double>::infinity());
+    n.end_array();
+    CHECK(n.str() == "\n[null]");
 }
 
 int main() { return tinytest::run_all(); }
