@@ -499,7 +499,7 @@ void MasterPage::play(const QString& which) {
         player = new QMediaPlayer(this);
         audio = new QAudioOutput(this);
         player->setAudioOutput(audio);
-        audio->setVolume(0.8);
+        audio->setVolume(0.8f);
     }
     player->setSource(QUrl::fromLocalFile(path));
     player->play();

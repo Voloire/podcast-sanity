@@ -12,6 +12,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8)
+  # MSVC warns about the standard C functions it considers unsafe. They are
+  # used deliberately and the code does not rely on the *_s variants.
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -49,7 +52,9 @@ find_package(PkgConfig QUIET)
 set(SANITY_HAVE_MP3 FALSE)
 set(SANITY_HAVE_SNDFILE FALSE)
 
-if(PkgConfig_FOUND)
+# pkg-config reports bare "-lsndfile" style names, which MSVC cannot resolve,
+# so it is only trusted on toolchains that understand them.
+if(PkgConfig_FOUND AND NOT MSVC)
   pkg_check_modules(MP3LAME QUIET lame)
   pkg_check_modules(SNDFILE QUIET sndfile)
   if(MP3LAME_FOUND)

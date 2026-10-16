@@ -121,7 +121,7 @@ public:
     explicit WaveformView(QWidget* parent = nullptr);
 
     void set_samples(const std::vector<float>& mono, int sample_rate);
-    void append_samples(const float* data, std::size_t n, int sample_rate);
+    void append_samples(const float* samples, std::size_t n, int sample_rate);
     void clear();
     void set_markers(const QString& label, const QVector<QPair<double, double>>& ranges);
     void set_playhead(double seconds);
