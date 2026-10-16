@@ -55,6 +55,16 @@ void usage() {
         "Filler Killer:\n"
         "  --filler off|cautious|balanced|aggressive   (default off)\n"
         "\n"
+        "Music bed:\n"
+        "  --music FILE               Mix a music file under the voice\n"
+        "  --music-level DB           Level relative to speech in pauses (default -14)\n"
+        "  --music-duck DB            Extra attenuation during speech (default -10)\n"
+        "  --music-tail S             Extend the output by S seconds\n"
+        "  --music-offset S           Start the bed S seconds into the episode\n"
+        "  --music-fade-in S          Fade in duration (default 1.5)\n"
+        "  --music-fade-out S         Fade out duration (default 3)\n"
+        "  --music-no-loop            Play the music once\n"
+        "\n"
         "Output:\n"
         "  --float                     Write 32 bit float WAV (default 16 bit)\n"
         "  --deliver PROFILE           Apply a distribution profile (target, channels, format)\n"
@@ -85,6 +95,7 @@ struct Args {
     std::string gen_corpus;
     std::string profile = "home";
     std::string deliver;
+    std::string music;
     double seconds = 20.0;
     bool female = false;
     bool analyze_only = false;
@@ -141,6 +152,23 @@ bool parse(int argc, char** argv, Args& a) {
             if (!value(a.deliver)) return false;
         } else if (k == "--list-profiles") {
             a.list_profiles = true;
+        } else if (k == "--music") {
+            if (!value(a.music)) return false;
+            a.params.music_bed.enabled = true;
+        } else if (k == "--music-level") {
+            if (!next(a.params.music_bed.bed_level_db)) return false;
+        } else if (k == "--music-duck") {
+            if (!next(a.params.music_bed.duck_db)) return false;
+        } else if (k == "--music-tail") {
+            if (!next(a.params.music_bed.tail_s)) return false;
+        } else if (k == "--music-offset") {
+            if (!next(a.params.music_bed.offset_s)) return false;
+        } else if (k == "--music-fade-in") {
+            if (!next(a.params.music_bed.fade_in_s)) return false;
+        } else if (k == "--music-fade-out") {
+            if (!next(a.params.music_bed.fade_out_s)) return false;
+        } else if (k == "--music-no-loop") {
+            a.params.music_bed.loop = false;
         } else if (k == "--seconds") {
             if (!next(a.seconds)) return false;
         } else if (k == "--female") {
@@ -320,7 +348,12 @@ int main(int argc, char** argv) {
         }
     }
     AudioBuffer out;
-    const Report rep = master(in, a.params, out);
+    AudioBuffer music;
+    if (!a.music.empty() && !audio_read(a.music, music, err)) {
+        std::fprintf(stderr, "cannot read %s: %s\n", a.music.c_str(), err.c_str());
+        return 1;
+    }
+    const Report rep = master(in, a.params, a.music.empty() ? nullptr : &music, out);
 
     if (eo.format == ExportFormat::Wav16 && a.float_out) eo.format = ExportFormat::WavFloat32;
     if (!encoder_available(eo.format)) {

@@ -123,6 +123,14 @@ set_tests_properties(cli_list_profiles PROPERTIES
   PASS_REGULAR_EXPRESSION "podcast-voice .*\\(recommended\\)")
 
 # ---- end-to-end harness ----------------------------------------------------
+if(WIN32)
+  add_test(NAME cli_music_bed
+    COMMAND ${CMAKE_COMMAND} -E env SANITY_TMP=${CMAKE_CURRENT_BINARY_DIR}
+            powershell -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_music_bed.ps1
+            $<TARGET_FILE:podcast-sanity-render>)
+  set_tests_properties(cli_music_bed PROPERTIES PASS_REGULAR_EXPRESSION "OK music bed")
+endif()
+
 # Generates synthetic episodes with ground truth, runs the whole chain and
 # judges the result. Slower than the unit tests, so it is a separate target.
 add_executable(sanity_e2e_tests tests/e2e_main.cpp)
