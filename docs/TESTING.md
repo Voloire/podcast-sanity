@@ -117,6 +117,16 @@ opt-in.
 
 ## 4. The GUI self test
 
+On Windows, `ctest -C Release` runs the native Windows platform plugin. The build
+deploys Qt beside the executable automatically. The Windows codec test also
+round-trips Unicode filenames and checks stereo channel separation in WAV,
+FLAC, Ogg and MP3 (when the codecs are present).
+
+`packaging/test-windows-msi.ps1 -Msi <path>` tests the actual installed MSI with
+SDK paths removed, saving GUI screenshots and logs. This leaves the per-user
+installation available from the desktop and Start menu. See
+[packaging](../packaging/README.md#windows--msi).
+
 ```
 xvfb-run -a --server-args="-screen 0 1400x900x24" \
   ./podcast-sanity --selftest --selftest-seconds 12

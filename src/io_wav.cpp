@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 
 namespace sanity {
 
@@ -32,7 +33,7 @@ void wr16(std::vector<unsigned char>& v, std::uint16_t x) {
 }  // namespace
 
 bool wav_read(const std::string& path, AudioBuffer& out, std::string& err) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
     if (!f) {
         err = "cannot open " + path;
         return false;
@@ -194,7 +195,7 @@ bool wav_write(const std::string& path, const AudioBuffer& in, bool float32, std
         }
     }
 
-    std::ofstream f(path, std::ios::binary);
+    std::ofstream f(std::filesystem::u8path(path), std::ios::binary);
     if (!f) {
         if (err) *err = "cannot write " + path;
         return false;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <vector>
 
 #include "sanity/dsp.hpp"
@@ -86,7 +87,11 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
         return false;
     }
 
+#ifdef _WIN32
+    FILE* f = _wfopen(std::filesystem::u8path(path).c_str(), L"wb");
+#else
     FILE* f = std::fopen(path.c_str(), "wb");
+#endif
     if (!f) {
         lame_close(gfp);
         err = "cannot open " + path;
@@ -97,7 +102,6 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
     const int chunk = 1152;
     std::vector<unsigned char> out(static_cast<std::size_t>(chunk) * 5 / 4 + 7200);
     const float* left = src.channel(0);
-    const float* right = src.channels > 1 ? src.channel(1) : nullptr;
     std::size_t pos = 0;
     bool ok = true;
     while (pos < frames) {
@@ -107,8 +111,8 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
             written = lame_encode_buffer_ieee_float(gfp, left + pos, left + pos, n, out.data(),
                                                     static_cast<int>(out.size()));
         } else {
-            written = lame_encode_buffer_ieee_float(gfp, left + pos, right + pos, n, out.data(),
-                                                    static_cast<int>(out.size()));
+            written = lame_encode_buffer_interleaved_ieee_float(
+                gfp, src.data.data() + 2 * pos, n, out.data(), static_cast<int>(out.size()));
         }
         if (written < 0) {
             ok = false;
@@ -151,7 +155,11 @@ bool encode_sndfile(const std::string& path, const AudioBuffer& in, const Export
         err = "unsupported format";
         return false;
     }
+#ifdef _WIN32
+    SNDFILE* sf = sf_wchar_open(std::filesystem::u8path(path).c_str(), SFM_WRITE, &info);
+#else
     SNDFILE* sf = sf_open(path.c_str(), SFM_WRITE, &info);
+#endif
     if (!sf) {
         err = sf_strerror(nullptr);
         return false;

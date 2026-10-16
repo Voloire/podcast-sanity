@@ -2,12 +2,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "sanity/audio.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
 #include "tinytest.hpp"
 
@@ -17,7 +20,70 @@ extern "C" {
 }
 #endif
 
+#if SANITY_HAVE_SNDFILE
+#include <sndfile.h>
+#endif
+
 using namespace sanity;
+
+TT_CASE("exports: Unicode paths, formats and stereo channel separation") {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() /
+        ("sanity-codecs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); }
+    } cleanup{dir};
+    AudioBuffer audio = AudioBuffer::zeros(48000, 2, 48000);
+    for (std::size_t i = 0; i < audio.frames(); ++i)
+        audio.data[2 * i] = static_cast<float>(0.4 * std::sin(kTwoPi * 440 * i / 48000));
+    for (auto format : {ExportFormat::Wav16, ExportFormat::Wav24, ExportFormat::Flac,
+                        ExportFormat::Ogg, ExportFormat::Mp3}) {
+        if (!encoder_available(format)) continue;
+        const auto path = dir / fs::u8path("episodio-\xc3\xa8-\xe6\xb8\xac" + export_extension(format));
+        const auto utf8 = path.u8string();
+        const std::string name(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+        ExportOptions options;
+        options.format = format;
+        std::string error;
+        CHECK(encode_audio(name, audio, options, error));
+        CHECK(fs::exists(path));
+        if (!fs::exists(path)) continue;
+        CHECK(fs::file_size(path) > 1024);
+#if SANITY_HAVE_SNDFILE
+        SF_INFO info{};
+#ifdef _WIN32
+        auto* file = sf_wchar_open(path.c_str(), SFM_READ, &info);
+#else
+        auto* file = sf_open(path.c_str(), SFM_READ, &info);
+#endif
+        CHECK(file != nullptr);
+        if (!file) continue;
+        CHECK(info.channels == 2);
+        CHECK(info.samplerate == 48000);
+        if (format == ExportFormat::Wav24)
+            CHECK((info.format & SF_FORMAT_SUBMASK) == SF_FORMAT_PCM_24);
+        std::vector<float> decoded(static_cast<std::size_t>(info.frames) * info.channels);
+        const auto frames = sf_readf_float(file, decoded.data(), info.frames);
+        sf_close(file);
+        CHECK_GE(frames, 48000);
+        double left = 0, right = 0;
+        for (sf_count_t i = 0; i < frames; ++i) {
+            left += decoded[2 * i] * decoded[2 * i];
+            right += decoded[2 * i + 1] * decoded[2 * i + 1];
+        }
+        CHECK(left > 1000);
+        CHECK(right < left * 0.001);
+#else
+        if (format == ExportFormat::Wav16) {
+            AudioBuffer decoded;
+            CHECK(wav_read(name, decoded, error));
+            CHECK(decoded.frames() == audio.frames());
+        }
+#endif
+    }
+}
 
 namespace {
 

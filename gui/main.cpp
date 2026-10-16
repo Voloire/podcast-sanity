@@ -7,6 +7,11 @@
 #include <QStandardPaths>
 #include <QStyleFactory>
 #include <QTimer>
+#include <QIcon>
+#if SANITY_HAVE_QTMM
+#include <QAudioDevice>
+#include <QMediaDevices>
+#endif
 
 #include <cstdio>
 
@@ -170,6 +175,7 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName(QStringLiteral("Voloire"));
     QApplication::setOrganizationDomain(QStringLiteral("voloire.local"));
     QApplication::setDesktopFileName(QStringLiteral("podcast-sanity"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/podcast-sanity.ico")));
 
     // Fusion looks the same everywhere, which is what the QSS theme expects.
     if (QStyleFactory::keys().contains(QStringLiteral("Fusion")))
@@ -193,9 +199,27 @@ int main(int argc, char** argv) {
     parser.addOption(selftest);
     parser.addOption(seconds);
     parser.addOption(shots);
+    QCommandLineOption devices(QStringLiteral("list-audio-devices"),
+                               QStringLiteral("Elenca gli ingressi audio e termina."));
+    parser.addOption(devices);
     parser.addPositionalArgument(QStringLiteral("audio"),
                                  QStringLiteral("File WAV da aprire all'avvio."));
     parser.process(app);
+    if (parser.isSet(devices)) {
+#if SANITY_HAVE_QTMM
+        const auto inputs = QMediaDevices::audioInputs();
+        for (const auto& device : inputs) {
+            const auto format = device.preferredFormat();
+            std::printf("%s%s: %d Hz, %d channels\n", device.isDefault() ? "* " : "  ",
+                        device.description().toUtf8().constData(), format.sampleRate(),
+                        format.channelCount());
+        }
+        std::fflush(stdout);
+        return inputs.isEmpty() ? 1 : 0;
+#else
+        return 1;
+#endif
+    }
 
     QSettings st;
     gui::set_mode(st.value("ui/theme", 0).toInt() == 1 ? gui::ThemeMode::Dark

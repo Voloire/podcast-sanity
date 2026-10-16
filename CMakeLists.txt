@@ -10,11 +10,16 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_compile_options(-Wall -Wextra -Wpedantic)
+if(MSVC)
+  add_compile_options(/W4 /permissive- /utf-8)
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
 option(SANITY_WITH_GUI "Build the Qt6 desktop application" ON)
 option(SANITY_WITH_EBUR128 "Cross-check loudness against libebur128 in tests" ON)
 option(SANITY_SANITIZE "Build the core with ASan/UBSan" OFF)
+option(SANITY_REQUIRE_CODECS "Fail if MP3 or FLAC/Ogg support is missing" OFF)
 
 set(SANITY_CORE_SOURCES
   src/json.cpp
@@ -42,19 +47,33 @@ endif()
 find_package(PkgConfig QUIET)
 set(SANITY_HAVE_MP3 FALSE)
 set(SANITY_HAVE_SNDFILE FALSE)
+find_package(mp3lame CONFIG QUIET)
+find_package(SndFile CONFIG QUIET)
+if(TARGET mp3lame::mp3lame)
+  target_link_libraries(sanity_core PUBLIC mp3lame::mp3lame)
+  set(SANITY_HAVE_MP3 TRUE)
+endif()
+if(TARGET SndFile::sndfile)
+  target_link_libraries(sanity_core PUBLIC SndFile::sndfile)
+  set(SANITY_HAVE_SNDFILE TRUE)
+endif()
 if(PkgConfig_FOUND)
   pkg_check_modules(MP3LAME QUIET lame)
   pkg_check_modules(SNDFILE QUIET sndfile)
-  if(MP3LAME_FOUND)
+  if(MP3LAME_FOUND AND NOT SANITY_HAVE_MP3)
     set(SANITY_HAVE_MP3 TRUE)
     target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIRS})
   endif()
-  if(SNDFILE_FOUND)
+  if(SNDFILE_FOUND AND NOT SANITY_HAVE_SNDFILE)
     set(SANITY_HAVE_SNDFILE TRUE)
     target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIRS})
   endif()
+endif()
+message(STATUS "Codecs: MP3=${SANITY_HAVE_MP3}, FLAC/Ogg=${SANITY_HAVE_SNDFILE}")
+if(SANITY_REQUIRE_CODECS AND (NOT SANITY_HAVE_MP3 OR NOT SANITY_HAVE_SNDFILE))
+  message(FATAL_ERROR "Release package requires LAME and libsndfile")
 endif()
 target_compile_definitions(sanity_core PUBLIC
   SANITY_HAVE_MP3=$<BOOL:${SANITY_HAVE_MP3}>
@@ -101,10 +120,13 @@ set_tests_properties(e2e PROPERTIES TIMEOUT 900)
 
 # ---- GUI ------------------------------------------------------------------
 if(SANITY_WITH_GUI)
-  find_package(Qt6 QUIET COMPONENTS Widgets Multimedia)
+  # Multimedia is optional: without it the app still records from a file or the
+  # synthetic corpus, so a Qt install that lacks the module must not disable the
+  # whole GUI.
+  find_package(Qt6 QUIET COMPONENTS Widgets OPTIONAL_COMPONENTS Multimedia)
   if(Qt6_FOUND)
     set(CMAKE_AUTOMOC ON)
-    add_executable(podcast-sanity
+    add_executable(podcast-sanity WIN32
       gui/main.cpp
       gui/mainwindow.h
       gui/mainwindow.cpp
@@ -129,6 +151,12 @@ if(SANITY_WITH_GUI)
     target_link_libraries(podcast-sanity PRIVATE sanity_core Qt6::Widgets)
     target_include_directories(podcast-sanity PRIVATE gui)
     target_compile_definitions(podcast-sanity PRIVATE SANITY_VERSION="${PROJECT_VERSION}")
+    if(WIN32)
+      configure_file(packaging/windows.rc.in windows.rc @ONLY)
+      target_sources(podcast-sanity PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
+    endif()
+    qt_add_resources(podcast-sanity app_icon PREFIX "/" BASE data
+      FILES data/podcast-sanity.ico)
     if(TARGET Qt6::Multimedia)
       target_link_libraries(podcast-sanity PRIVATE Qt6::Multimedia)
       target_compile_definitions(podcast-sanity PRIVATE SANITY_HAVE_QTMM=1)
@@ -142,7 +170,14 @@ if(SANITY_WITH_GUI)
     # Automated interface test: walks every page, runs the chain and exports an
     # MP3. Runs under a virtual display in CI.
     find_program(XVFB_RUN xvfb-run)
-    if(XVFB_RUN)
+    if(WIN32)
+      find_program(SANITY_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
+      add_custom_command(TARGET podcast-sanity POST_BUILD
+        COMMAND "${SANITY_WINDEPLOYQT}" --release --no-translations --no-compiler-runtime
+                "$<TARGET_FILE:podcast-sanity>"
+        VERBATIM)
+      add_test(NAME gui COMMAND podcast-sanity --selftest --selftest-seconds 8)
+    elseif(XVFB_RUN)
       add_test(NAME gui
         COMMAND ${XVFB_RUN} -a "--server-args=-screen 0 1400x900x24"
                 $<TARGET_FILE:podcast-sanity> --selftest --selftest-seconds 8)
@@ -153,7 +188,7 @@ if(SANITY_WITH_GUI)
     endif()
     set_tests_properties(gui PROPERTIES TIMEOUT 300)
   else()
-    message(STATUS "Qt6 not found: GUI skipped")
+    message(FATAL_ERROR "SANITY_WITH_GUI=ON requires Qt6 Widgets")
   endif()
 endif()
 
@@ -162,13 +197,30 @@ include(GNUInstallDirs)
 install(TARGETS podcast-sanity-render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  if(WIN32)
+    find_program(SANITY_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
+    # Deploy into the install tree: copying DLLs beside build outputs alone does
+    # not include them in an MSI. The same payload is used by MSI and ZIP.
+    configure_file(packaging/deploy-windows.cmake.in deploy-windows.cmake @ONLY)
+    install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/deploy-windows.cmake")
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    include(InstallRequiredSystemLibraries)
+    install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION licenses)
+    if(VCPKG_INSTALLED_DIR)
+      foreach(codec mp3lame libsndfile libflac libogg libvorbis mpg123 opus)
+        install(FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${codec}/copyright"
+          DESTINATION "licenses/${codec}")
+      endforeach()
+    endif()
+  else()
   install(FILES data/podcast-sanity.desktop
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES data/io.github.voloire.podcast-sanity.metainfo.xml
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
   install(FILES data/podcast-sanity.svg
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
-          RENAME podcast-sanity.svg)
+           RENAME podcast-sanity.svg)
+  endif()
 endif()
 
 # ---- packaging -----------------------------------------------------------
@@ -211,7 +263,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
 endif()
 
 if(WIN32)
+  configure_file(LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt" COPYONLY)
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
+  if(CPACK_WIX_ROOT)
+    file(TO_CMAKE_PATH "${CPACK_WIX_ROOT}" CPACK_WIX_ROOT)
+  endif()
+  if(CMAKE_VERSION VERSION_LESS 4.3)
+    message(FATAL_ERROR "Windows per-user MSI packaging requires CMake 4.3 or newer")
+  endif()
   set(CPACK_GENERATOR "WIX;ZIP")
+  set(CPACK_WIX_INSTALL_SCOPE "perUser")
+  set(CPACK_PACKAGE_FILE_NAME "podcast-sanity-${PROJECT_VERSION}-win64")
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "Podcast Sanity")
+  set(CPACK_CREATE_DESKTOP_LINKS "podcast-sanity")
 else()
   set(CPACK_GENERATOR "DEB;TGZ")
 endif()

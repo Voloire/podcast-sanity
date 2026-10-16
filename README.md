@@ -35,8 +35,11 @@ cmake --build build
 cd build && ctest --output-on-failure
 ```
 
-Windows: configure with the same command in a Qt6 developer shell; the WiX
-generator needs the WiX Toolset on `PATH`.
+Windows 11 x64: use `packaging\build-windows.ps1` to build the native application,
+run the tests and create a self-contained **MSI** and portable ZIP. The installer
+includes Qt, codecs and the Visual C++ runtime and installs for the current user.
+See [Windows build and installation](packaging/README.md#windows--msi) for
+prerequisites and paths. Docker, WSL and Python are not required to run the app.
 
 ### Packages
 

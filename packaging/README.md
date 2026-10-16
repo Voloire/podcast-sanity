@@ -37,35 +37,53 @@ sudo apt remove podcast-sanity
 
 ## Windows — MSI
 
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-      -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON
-cmake --build build --config Release --parallel
-cd build; cpack -G WIX -C Release
-# -> podcast-sanity-<version>-win64.msi
-```
+Native x64 C++/Qt application. No Docker, WSL, Python or Qt SDK is needed on the
+target machine. The MSI installs for the current user into
+`%LOCALAPPDATA%\Podcast Sanity`, with Start menu and desktop shortcuts, and an
+entry in Windows **Settings → Apps → Installed apps**. No administrator account
+is required. A ZIP containing the same runtime is also produced.
 
-Notes:
+Build prerequisites:
 
-* `CPACK_WIX_UPGRADE_GUID` is fixed, so a newer MSI **upgrades** the existing
-  install instead of stacking beside it. Never change it after the first public
-  release.
-* The WiX generator needs the WiX Toolset on `PATH` and, for a self-contained
-  installer, the Qt runtime DLLs. `packaging/wix_patch.xml` is the hook for that
-  (see below); it is optional and the MSI builds without it.
-* Branding images (`data/podcast-sanity.ico`, `data/wix-banner.bmp`,
-  `data/wix-dialog.bmp`) are optional and referenced only when present.
+* Visual Studio Build Tools 2019 or 2022, C++ workload and Windows SDK;
+* CMake **4.3+** (per-user MSI support), Qt 6.5+ Widgets and Multimedia for MSVC x64;
+* WiX **3.14** (`candle.exe` and `light.exe`);
+* vcpkg packages `mp3lame:x64-windows` and `libsndfile:x64-windows`.
 
-### Bundling the Qt runtime
-
-Either deploy the DLLs next to the executable with `windeployqt` before running
-`cpack`:
+Build, test and package from PowerShell:
 
 ```powershell
-windeployqt --release --multimedia build\Release\podcast-sanity.exe
+.\packaging\build-windows.ps1
+# Defaults match the Windows development machine: MSVC 2019 and deps under $HOME.
+# Override paths / generator on other machines:
+.\packaging\build-windows.ps1 -QtRoot C:\Qt\6.8.1\msvc2022_64 `
+  -VcpkgRoot C:\vcpkg -WixRoot C:\tools\wix `
+  -Generator 'Visual Studio 17 2022'
 ```
 
-or list them in `packaging/wix_patch.xml` so WiX carries them into the MSI.
+Artifacts: `build-windows\packages\podcast-sanity-0.1.0-win64.msi` and `.zip`.
+The release script requires all codecs and stops on a failed build or test.
+`windeployqt` runs on both build output and the CPack install tree. The package
+includes the Windows platform/audio plugins, codecs, transitive DLLs, Visual C++
+runtime, and license notices. Merely deploying DLLs into a build folder is not
+sufficient to package them; `deploy-windows.cmake.in` handles the install tree.
+
+Verify the **installed MSI**, with SDK/Qt directories removed from the process
+environment (this leaves the application installed):
+
+```powershell
+.\packaging\test-windows-msi.ps1 `
+  -Msi .\build-windows\packages\podcast-sanity-0.1.0-win64.msi
+```
+
+This checks installation, CLI startup, all seven GUI pages, mastering and MP3
+export. Logs and screenshots are in `build-windows\installer-test`. Microphone
+enumeration can be checked with `podcast-sanity.exe --list-audio-devices`; the
+selftest uses synthetic audio and does not record the microphone.
+
+Keep `CPACK_WIX_UPGRADE_GUID` stable for future upgrades. The current build is
+unsigned. `data/podcast-sanity.ico` is checked in; `generate-icon.py` is only an
+optional artwork regeneration tool.
 
 ## Codec availability
 
