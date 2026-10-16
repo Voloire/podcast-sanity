@@ -65,6 +65,8 @@ before/after numbers, export an MP3 at 96 kbps mono, upload it to your hosting,
 and publish through your RSS feed. Spotify and Apple Podcasts read that feed;
 neither has an upload API.
 
+The export page offers the same profiles; the recommended one is selected by default.
+
 While recording, audio is appended to a crash-safe file as it arrives, so a crash
 does not lose the take — the Record page offers to recover it.
 
@@ -76,6 +78,7 @@ The same engine, scriptable:
 podcast-sanity-render episode.wav --out master.wav \
     --power-clean --filler cautious --summary --report report.json
 podcast-sanity-render episode.wav --analyze-only
+podcast-sanity-render episode.wav --out episode.mp3 --deliver podcast-voice
 podcast-sanity-render --gen-corpus demo.wav --profile home --seconds 30
 ```
 

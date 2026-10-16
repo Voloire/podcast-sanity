@@ -76,9 +76,25 @@ touch:
 * **Mono ≤ 96 kbps MP3**, **stereo ≤ 192 kbps MP3**.
 
 `recommended_mp3_bitrate(channels)` encodes exactly this, and the export page
-uses it as the default and warns when a higher bitrate is chosen. Because the
-master is already loudness- and peak-conformant *before* encoding, a re-encode
-by the host cannot move it out of spec by any meaningful amount.
+uses it as the default and warns when a higher bitrate is chosen.
+
+The engine's delivery profiles, listed by `podcast-sanity-render --list-profiles`,
+are shared by the CLI and the export page:
+
+| Profile id | Format | Channels | Loudness | True peak | When to use |
+|------------|--------|----------|----------|-----------|-------------|
+| **podcast-voice (recommended)** | MP3 96 kbps | Mono | -19 LUFS | -1 dBTP | Spoken-word podcast hosting |
+| podcast-stereo | MP3 192 kbps | Stereo | -16 LUFS | -1 dBTP | Podcasts with music |
+| archive-wav24 | WAV 24 bit | Keep input | Auto: -19 mono / -16 stereo | -1 dBTP | Lossless archive for later exports |
+| lossless-flac | FLAC 24 bit | Keep input | Auto: -19 mono / -16 stereo | -1 dBTP | Hosts that accept FLAC |
+| broadcast-r128 | WAV 24 bit, 48 kHz | Keep input | -23 LUFS | -1 dBTP | EBU R128 radio hand-over |
+
+All profiles except `broadcast-r128` keep the input sample rate in the engine.
+
+MP3 decoding overshoots the encoded peaks by up to about 1 dB. The true peak
+ceiling is enforced on the master before encoding; the decoded MP3 is checked
+by the harness to stay below 0 dBTP. Hosts that re-encode do their own limiting;
+the mono 96 kbps envelope avoids that re-encode.
 
 Other formats are offered for archival or for hosts that accept them: WAV 16/24
 and 32-bit float, FLAC 24, and Ogg Vorbis. The build hides any format for which
