@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "sanity/audio.hpp"
+#include "sanity/corpus.hpp"
 #include "sanity/dsp.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
@@ -449,6 +450,23 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     for (const auto& s : segs)
         if (s.cls == SegClass::Silence && (s.end - s.start) * 10 >= 400) found_silence = true;
     CHECK(found_silence);
+}
+
+// -------------------------------------------------------------- corpus bounds
+TT_CASE("corpus generator stays inside its buffers for every seed and length") {
+    // Seeds 8 and 11 at 12 s and seed 4 at 20 s used to write past the end of
+    // the voiced buffer (hesitation vowel not clamped to the total length).
+    for (unsigned seed : {4u, 8u, 11u, 3u, 6u, 22u, 33u}) {
+        for (double seconds : {8.0, 12.0, 20.0, 60.0}) {
+            const CorpusItem it =
+                make_corpus_talk(48000, seconds, degradation_rough(), seed, "bounds", false);
+            const std::size_t total = static_cast<std::size_t>(seconds * 48000);
+            CHECK(it.clean.size() == total);
+            CHECK(it.degraded.size() == total);
+            for (const Span& f : it.fillers) CHECK(f.end <= total && f.start < f.end);
+            for (const Span& w : it.words) CHECK(w.end <= total && w.start <= w.end);
+        }
+    }
 }
 
 // ------------------------------------------------------- multichannel loudness

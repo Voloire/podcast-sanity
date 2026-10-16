@@ -100,7 +100,7 @@ struct Resonator {
         const double w0 = kTwoPi * f / fs;
         const double a1 = -2.0 * r * std::cos(w0);
         const double a2 = r * r;
-        const double gain = (1.0 - r) * std::sqrt(1.0 - a1 * r * r / (4.0) * 0.0 + 0.0);
+        const double gain = 1.0 - r;
         const double y = gain * x - a1 * y1 - a2 * y2;
         y2 = y1;
         y1 = y;
@@ -246,7 +246,10 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
             pos += static_cast<std::size_t>((0.25 + 0.15 * rnd.uniform()) * sample_rate);
             // One sustained vowel, flat pitch, no consonants.
             const double dur = 0.30 + 0.20 * rnd.uniform();
-            const std::size_t n = static_cast<std::size_t>(dur * sample_rate);
+            if (pos >= total) break;
+            // Never write past the end of the take: the loop guard only
+            // guarantees half a second of room.
+            const std::size_t n = std::min(static_cast<std::size_t>(dur * sample_rate), total - pos);
             const std::size_t start = pos;
             const Vowel v = schwa();
             r1.set(v.f1, 80);
@@ -261,7 +264,7 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
                 const double y = r1.process(src) + 0.7 * r2.process(src) + 0.35 * r3.process(src);
                 voiced[start + i] += static_cast<float>(y * env);
             }
-            item.fillers.push_back({start, std::min(total, start + n)});
+            item.fillers.push_back({start, start + n});
             pos += n;
             // A pause after the hesitation.
             pos += static_cast<std::size_t>((0.25 + 0.15 * rnd.uniform()) * sample_rate);
@@ -411,14 +414,14 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
     if (d.dc != 0.0)
         for (float& v : x) v = static_cast<float>(v + d.dc);
 
-    if (d.clicks > 0) {
+    if (d.clicks > 0 && x.size() >= 3) {
         Random cr(seed + 5);
         for (int i = 0; i < d.clicks; i++) {
             const std::size_t p = cr.between(1, x.size() - 2);
             x[p] = (i % 2 == 0) ? 0.95f : -0.95f;
         }
     }
-    if (d.dropout_per_min > 0.0) {
+    if (d.dropout_per_min > 0.0 && x.size() >= 2) {
         const int count = static_cast<int>(d.dropout_per_min * seconds / 60.0) + 1;
         Random dr(seed + 6);
         for (int i = 0; i < count; i++) {
