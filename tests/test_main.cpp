@@ -11,6 +11,7 @@
 #include "sanity/audio.hpp"
 #include "sanity/corpus.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/dynamics.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
 #include "tinytest.hpp"
@@ -450,6 +451,23 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     for (const auto& s : segs)
         if (s.cls == SegClass::Silence && (s.end - s.start) * 10 >= 400) found_silence = true;
     CHECK(found_silence);
+}
+
+// ------------------------------------------------------ peak-limited normalise
+TT_CASE("normalize_loudness never leaves the true peak above the ceiling on transient heavy material") {
+    const int fs = 48000;
+    // Quiet noise with loud clicks: reaching -16 LUFS needs about +25 dB on the
+    // noise, which the clicks cannot take, so every round limits hard and the
+    // loop runs out of rounds.
+    auto x = noise(0.01, static_cast<std::size_t>(fs) * 12, 5);
+    for (std::size_t i = fs / 2; i + 3 < x.size(); i += fs / 3) {
+        x[i] = 0.9f;
+        x[i + 1] = -0.9f;
+    }
+    const LoudnessTargetInfo info = normalize_loudness(x, fs, -16.0, -1.0);
+    CHECK(info.applied);
+    CHECK_LE(true_peak_db(x, fs), -1.0 + 0.05);
+    CHECK_LE(std::fabs(info.error_lu), 1.0);
 }
 
 // -------------------------------------------------------------- corpus bounds

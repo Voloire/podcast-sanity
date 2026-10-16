@@ -319,8 +319,10 @@ LoudnessTargetInfo normalize_loudness(std::vector<float>& x, int sample_rate, do
     // loudness, correct, and repeat. Two or three rounds are enough for the
     // result to land on the target with the peak exactly on the ceiling.
     info.true_peak_before_db = true_peak_db(x, sample_rate);
+    bool gained_after_limit = false;
     for (int round = 0; round < 4; round++) {
         const LimiterInfo li = limiter(x, sample_rate, true_peak_ceiling_db, false);
+        gained_after_limit = false;
         info.peak_rounds = round + 1;
         info.limiter_reduction_db = li.gain_reduction_db;
         info.limiter_max_reduction_db = li.max_reduction_db;
@@ -336,6 +338,20 @@ LoudnessTargetInfo normalize_loudness(std::vector<float>& x, int sample_rate, do
         if (std::fabs(err) < 0.05) break;
         apply_gain_db(x, err);
         total_gain += err;
+        gained_after_limit = err > 0.0;
+    }
+    if (gained_after_limit) {
+        // The loop ran out of rounds right after a gain-up: limit once more so
+        // the ceiling holds, and report the residual loudness error honestly.
+        const LimiterInfo li = limiter(x, sample_rate, true_peak_ceiling_db, false);
+        info.limiter_reduction_db = li.gain_reduction_db;
+        info.limiter_max_reduction_db = std::max(info.limiter_max_reduction_db, li.max_reduction_db);
+        const double tp = true_peak_db(x, sample_rate);
+        if (tp > true_peak_ceiling_db) {
+            apply_gain_db(x, true_peak_ceiling_db - tp);
+            total_gain += true_peak_ceiling_db - tp;
+        }
+        info.peak_rounds++;
     }
 
     const LoudnessStats fin = measure_loudness(x, sample_rate);
