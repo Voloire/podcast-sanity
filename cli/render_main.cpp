@@ -11,6 +11,7 @@
 
 #include "sanity/audio.hpp"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/dsp.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
@@ -31,6 +32,7 @@ void usage() {
         "\n"
         "Usage:\n"
         "  podcast-sanity-render IN.wav --out OUT.wav [options]\n"
+        "  podcast-sanity-render IN.wav --out episode.mp3 --deliver podcast-voice\n"
         "  podcast-sanity-render --gen-corpus OUT.wav [--profile studio|home|rough]\n"
         "  podcast-sanity-render IN.wav --analyze-only\n"
         "\n"
@@ -90,6 +92,7 @@ struct Args {
     bool summary = false;
     bool quiet = false;
     bool float_out = false;
+    bool list_profiles = false;
     Params params;
 };
 
@@ -136,6 +139,8 @@ bool parse(int argc, char** argv, Args& a) {
             if (!value(a.profile)) return false;
         } else if (k == "--deliver") {
             if (!value(a.deliver)) return false;
+        } else if (k == "--list-profiles") {
+            a.list_profiles = true;
         } else if (k == "--seconds") {
             if (!next(a.seconds)) return false;
         } else if (k == "--female") {
@@ -252,6 +257,11 @@ int main(int argc, char** argv) {
         usage();
         return 2;
     }
+    if (a.list_profiles) {
+        for (const DistributionProfile& d : distribution_profiles())
+            std::printf("%-16s %s\n    %s\n", d.id, distribution_label(d).c_str(), d.note);
+        return 0;
+    }
     if (!a.gen_corpus.empty()) return gen_corpus(a);
     if (a.in.empty()) {
         usage();
@@ -293,10 +303,25 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    ExportOptions eo = export_options_for_path(a.out);
+    if (!a.deliver.empty()) {
+        const DistributionProfile* d = find_distribution_profile(a.deliver);
+        if (!d) {
+            std::fprintf(stderr, "unknown profile %s (see --list-profiles)\n", a.deliver.c_str());
+            return 2;
+        }
+        apply_distribution_profile(*d, a.params, eo);
+        const std::string want = export_extension(eo.format);
+        if (a.out.size() < want.size() ||
+            a.out.compare(a.out.size() - want.size(), want.size(), want) != 0) {
+            std::fprintf(stderr, "profile %s writes %s files: name the output accordingly\n",
+                         d->id, want.c_str());
+            return 2;
+        }
+    }
     AudioBuffer out;
     const Report rep = master(in, a.params, out);
 
-    ExportOptions eo = export_options_for_path(a.out);
     if (eo.format == ExportFormat::Wav16 && a.float_out) eo.format = ExportFormat::WavFloat32;
     if (!encoder_available(eo.format)) {
         std::fprintf(stderr, "cannot write %s: %s encoder is not available in this build\n",

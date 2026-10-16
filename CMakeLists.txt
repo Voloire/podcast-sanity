@@ -117,6 +117,9 @@ set_tests_properties(cli_missing_value PROPERTIES
   PASS_REGULAR_EXPRESSION "option --out needs a value")
 add_test(NAME cli_help COMMAND podcast-sanity-render --help)
 set_tests_properties(cli_help PROPERTIES PASS_REGULAR_EXPRESSION "--deliver")
+add_test(NAME cli_list_profiles COMMAND podcast-sanity-render --list-profiles)
+set_tests_properties(cli_list_profiles PROPERTIES
+  PASS_REGULAR_EXPRESSION "podcast-voice .*\\(recommended\\)")
 
 # ---- end-to-end harness ----------------------------------------------------
 # Generates synthetic episodes with ground truth, runs the whole chain and

@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -26,6 +27,8 @@
 
 #include "sanity/audio.hpp"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
+#include "sanity/encode.hpp"
 #include "sanity/json.hpp"
 #include "sanity/loudness.hpp"
 #include "sanity/master.hpp"
@@ -429,6 +432,32 @@ TT_CASE("e2e: a 44.1 kHz delivery from 48 kHz material keeps the target and the 
     CHECK(std::fabs(real.integrated_lufs - (-19.0)) <= 0.1);  // the engine lands within 0.05 LU
     CHECK_LE(real.true_peak_db, -1.0 + 0.02);
     CHECK(rep.conformant);
+}
+
+TT_CASE("e2e: the recommended delivery decodes within tolerance") {
+    if (!wanted("deliver")) return;
+    const DistributionProfile& d = recommended_distribution_profile();
+    if (!encoder_available(d.format)) { std::printf("    deliver  skipped: no encoder\n"); return; }
+    Params p = base_params();
+    ExportOptions o;
+    apply_distribution_profile(d, p, o);
+    CorpusItem item = make_item("home", opts().seconds);
+    AudioBuffer out;
+    const Report rep = master(buffer_of(item.degraded, item.sample_rate), p, out);
+    CHECK(rep.conformant);
+    const auto path = std::filesystem::temp_directory_path() / "sanity-deliver.mp3";
+    std::string err;
+    CHECK(encode_audio(path.string(), out, o, err));
+    AudioBuffer back;
+    CHECK(audio_read(path.string(), back, err));
+    const LoudnessStats m = measure_loudness(back);
+    print_line("deliver", m.integrated_lufs, m.true_peak_db);
+    CHECK(std::fabs(m.integrated_lufs - (-19.0)) <= 1.0);
+    // MP3 decoding overshoots: the ceiling is checked on the master, the
+    // decoded file only has to stay below full scale (documented in STANDARDS.md).
+    CHECK_LE(m.true_peak_db, 0.0);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 // The harness itself is a quality gate: scenarios must have run and the report
