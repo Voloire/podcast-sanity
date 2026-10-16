@@ -7,7 +7,8 @@ automatic cleanup, reverb reduction, filler removal without transcription,
 adaptive levelling and loudness / true-peak conformance to a delivery standard.
 
 * Language: C++20, no external DSP libraries. Every algorithm is in this tree.
-* GUI: Qt6 Widgets with a QSS theme (sage / cream light, charcoal dark).
+* GUI: Qt6 Widgets with Studio (charcoal/amber, default), Light and Dark themes,
+  bundled Ubuntu fonts and painted studio meters and controls.
 * Targets: Windows (MSI) and Linux (.deb). The same engine drives the CLI and
   the automated test harness.
 
@@ -23,6 +24,7 @@ gui/                 Qt6 desktop application
   pages/             the seven pages plus the page base class
   theme.{h,cpp}      design tokens + generated QSS
   widgets.{h,cpp}    Card, Chip, StatTile, LevelMeter, WaveformView, NavButton
+  studio_widgets.*   VuMeter, OnAirSign and LedIndicator
   app_state.{h,cpp}  shared session state + background mastering worker
   audio_capture.*    microphone / file / corpus recording sources
 tests/               unit tests and the end-to-end harness
@@ -88,18 +90,21 @@ peak back over the ceiling.
   rather than hard-coded for 48 kHz, so any sample rate is correct; the unit
   tests check the 48 kHz coefficients against the tabulated values to 1e-9.
 * **True peak** with 4× oversampling by a pruned polyphase FIR, only around
-  candidate peaks. Our own scan is more accurate than `ebur128_true_peak`, and
-  the tests assert a known case: 12 kHz at 45° phase on a 48 kHz grid gives
+   candidate peaks. The tests assert a known case: 12 kHz at 45° phase on a 48 kHz grid gives
   samples of ±0.6364 and a true peak of about −0.915 dBFS.
 
 **No third-party DSP is used.** `libebur128` and `lame` / `libsndfile` are
-optional *cross-checks and encoders* only, and the build works without them.
+optional cross-check and codec libraries; libsndfile also reads supported input
+formats. The engine build works without them.
 
 ### 2.3 Loudness (`src/loudness.cpp`)
 
 BS.1770-4 exactly: 400 ms gating blocks at 100 ms step, absolute gate −70 LUFS,
 relative gate −10 LU, the −0.691 offset applied once to the summed channel
 energies. LRA per EBU Tech 3342. Short term is a 3 s window, momentary 400 ms.
+Measurement sums channel energies without phase cancellation and takes the
+maximum per-channel true peak. The processing chain still uses the mono sum;
+dual-mono normalisation compensates for the delivered channel-energy sum.
 
 Loudness normalisation **iterates**: measure → compute the gain → apply → limit
 → re-measure, up to four rounds, stopping early when the error is under 0.05 LU.
@@ -138,8 +143,9 @@ removed only above a mode threshold:
 | Bilanciato | 0.54 | Ordinary editing |
 | Aggressivo | 0.42 | Tight cuts, accepts some risk |
 
-Measured separation on the corpus: true hesitations score 0.65–0.92, look-alikes
-stay at or below 0.64. Removals are crossfaded with an equal-power window so
+The detector resamples to its calibrated 48 kHz rate and maps hits back to the
+original sample coordinates. Synthetic look-alikes occasionally exceed 0.64;
+see the measured false-positive allowance in `TESTING.md`. Removals are crossfaded with an equal-power window so
 there is no step in the waveform. Candidates are exposed through
 `detect_fillers(..., std::vector<FillerCandidate>*)` so the GUI can show what it
 *would* remove and the harness can score precision and recall.
@@ -154,10 +160,12 @@ it already knows the peak) are both covered by tests.
 
 ### 2.7 Export (`src/encode.cpp`)
 
-WAV 16/24/32f always; MP3 through LAME; FLAC and Ogg through libsndfile, each
+WAV 16/24/32f always; MP3 through LAME; FLAC, Ogg Vorbis and real Opus through libsndfile, each
 when the build has them (otherwise the option is hidden in the GUI).
 `recommended_mp3_bitrate()` encodes the hosting rule: mono ≤ 96 kbps and stereo
-≤ 192 kbps are the envelopes most hosts promise not to re-encode.
+≤ 192 kbps are the project's hosting recommendations, not a guarantee that a
+particular provider will preserve an uploaded file. Shared profiles also cover
+stereo podcasts, WAV/FLAC archives and broadcast delivery.
 
 ---
 
@@ -192,13 +200,14 @@ This was a first-class requirement, not an afterthought.
   Disabled stages still appear, with `enabled: false` and no metrics key.
 * The GUI surfaces the same data in three places: the Master page stage table,
   the Standards page conformance tiles, and the Diagnostics page JSON viewer,
-  which can also re-run the whole e2e harness in-process and save the report.
+which can also run its in-process diagnostic scenarios and save the report.
 * The CLI exits with code 3 when the result is not conformant, so a build
   pipeline can gate on it.
 
 `rtf` is processing milliseconds divided by the audio milliseconds. On this
-machine the full Power Clean chain with Filler Killer runs at RTF ≈ 0.17–0.22
-(roughly 5× real time), so a one-hour episode takes about ten minutes.
+machine the installed 8-second GUI self-test measured RTF about 0.04. Runtime
+depends on material, options and hardware; short corpus timings do not establish
+an hour-long episode's completion time.
 
 ---
 
@@ -215,25 +224,26 @@ page can be folded down to its headers.
 The seven pages are:
 
 1. **Registrazione** — source selection (microphone / file / synthetic corpus),
-   device pickers, sample rate, channels, input gain, anti-hum, VAD auto-split,
-   headphone monitoring, a guided three-second microphone test that measures the
+   input-device picker, sample rate, channels, input gain,
+   a guided three-second microphone test that measures the
    input peak and recommends a gain change, REC / PAUSA / RIPRENDI / STOP, a
-   hotkeyed marker button (`M`), live level and true-peak meters, a rolling
+   hotkeyed marker button (`M`), an analogue VU, sample-peak and 4x true-peak bars,
+   an ON AIR sign, a rolling
    30-second waveform, and the crash-safe recovery control.
 2. **Sanity Master** — the preset, every switch in the chain with its own
    strength control, the Filler Killer mode plus a "show what it would remove"
-   table, the process button with elapsed time, before/after tiles, A/B playback
+   background candidate table, music-bed controls and preview, the process button
+   with elapsed time, before/after loudness meters and tiles, A/B playback
    of the original against the master, and the per-stage diagnostics table.
 3. **Standard & Loudness** — the published standards, the target editor, the
-   conformance panel, and a "measure a file" analysis of any WAV with the full
+   conformance panel, and a "measure a file" analysis of supported audio with the full
    BS.1770-4 read-out.
 4. **Libreria / Sessioni** — saved sessions with loudness, true peak and
    conformance, per-row open / re-export / reveal / delete, search and a
    configurable library folder.
 5. **Esporta & Pubblica** — format, channels, rate, filename, the no-re-encode
    hint, a pre-flight conformance check, the export itself, and the publishing
-   steps for RSS and Spotify (which has no upload API: you publish through a
-   hosted feed).
+   steps for publishing through a hosted RSS feed. The app makes no upload calls.
 6. **Impostazioni** — theme, engine defaults, folders, the offline/privacy
    statement and the version.
 7. **Diagnostica & Test** — runs the e2e harness in-app on three synthetic
@@ -249,11 +259,12 @@ parameters, master, report). Pages never call each other; they read and write
 `params_changed`, `library_changed`, `mastering_started/finished`,
 `status_message`, `theme_changed`).
 
-Mastering runs on a `QThread` worker, so the interface never blocks. The
-diagnostics harness and the microphone test likewise run off the GUI thread and
-post results back with queued invocations. No widget is ever touched from a
-worker — the harness was restructured specifically so the table is filled on the
-GUI thread.
+Mastering, diagnostic scenarios, filler detection and music-preview mixing run
+on workers and post results back to the GUI thread. File loading, some preview
+preparation and capture-meter updates still run on the GUI thread. The microphone
+test is timer-driven; it does not sleep on the GUI thread. Cancel marks a job
+discarded immediately, updates the UI and ignores its eventual result; the
+already-running engine computation continues in the background.
 
 The self test can walk all seven pages and capture each one with
 `QWidget::grab()` (`--selftest-shots DIR`), which is the visual-regression
@@ -271,8 +282,7 @@ session. If the app dies, the file is still on disk and the Record page offers t
 recover it. Memory during recording stays bounded: only a rolling 30-second
 window is kept for the display, and the full take is read from disk at the end.
 
-Device hot-plug and a full guided level-calibration wizard are wired at the
-`Capture` layer but the guided flow currently covers the level test; see §7.
+The guided flow covers a level test, not a full calibration wizard; see §7.
 
 ---
 
@@ -283,7 +293,9 @@ Device hot-plug and a full guided level-calibration wizard are wired at the
   Dependencies are generated with `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` and pinned to
   the Qt6, LAME and libsndfile runtime packages.
 * **Windows**: a fixed `CPACK_WIX_UPGRADE_GUID` makes upgrades replace the
-  previous install rather than stack beside it.
+  previous install rather than stack beside it. Version 0.2.0 includes Studio
+  artwork, a finish-page launch checkbox, trimmed Qt runtime and signing hooks.
+  Upgrade from 0.1.0, isolated installed-app execution and uninstall were tested.
 * Both are driven from the same `CMakeLists.txt`; `CPACK_GENERATOR` selects
   `DEB;TGZ` on Linux and `WIX;ZIP` on Windows.
 
@@ -291,10 +303,10 @@ Device hot-plug and a full guided level-calibration wizard are wired at the
 
 ## 6. What is verified, and how
 
-See `TESTING.md`. In short: 28 unit cases / 1269 checks, a 10-case / 55-check
-end-to-end harness over synthetic episodes with ground truth, and a GUI self test
+See `TESTING.md`. Windows: 11/11 CTest tests, 36 unit cases / 1342 checks,
+a 12-case / 66-check end-to-end harness (63 checks at 44.1 kHz), and a GUI self test
 that walks all seven pages, masters, exports an MP3 and checks the report
-contract. All three run under `ctest`.
+contract plus screenshot coverage. Debian release checks remain pending.
 
 ---
 
@@ -306,11 +318,15 @@ contract. All three run under `ctest`.
 * **No ASR.** Filler Killer is acoustic only. The "modalità precisa" that would
   detect individual filler *words* is a separate, larger project and is
   deliberately absent.
-* **Cancellation is cooperative, not immediate.** A running pipeline finishes
-  its current stage; the UI only prevents the result from being adopted.
+* **Cancellation does not preempt DSP computation.** The UI reports cancellation
+  immediately and discards the worker's result; CPU work may continue until the
+  current job completes.
 * **Recording device hot-plug** is detected but the recorder does not silently
   migrate to a new default device mid-take.
-* The guided microphone test measures level and estimates background noise; it
+* The guided microphone test measures the minimum rolling RMS during the test; it
   does not yet run a full sweep or a room-tone capture.
-* MP3 is the only lossy export tested against a real encoder constraint; Opus is
-  mapped to Ogg Vorbis through libsndfile.
+* Lossy encoding may raise decoded peaks. Delivery conformance describes the
+  unencoded master; the recommended MP3's decoded peak is separately checked.
+* Code signing requires a certificate the project does not have yet.
+* Interactive recording, preview, installer Finish and subjective listening
+  checks remain pending; automated screenshots cover the rendered interface.

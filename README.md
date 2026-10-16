@@ -13,6 +13,9 @@ service that matter for spoken word:
   −19 LUFS mono / −16 LUFS stereo, true peak ≤ −1 dBTP
 * a **Talk** preset and a **Music** preset
 * **Background music bed with ducking and a 15 s preview**
+* five shared delivery profiles, including recommended **podcast-voice**
+* **Studio** interface with Ubuntu fonts, VU meters, ON AIR, painted controls
+  and a waveform time ruler; Light and Dark themes remain available
 
 Ships as a Windows **MSI** and a Linux **.deb**, from one CMake project.
 
@@ -46,8 +49,8 @@ prerequisites and paths. Docker, WSL and Python are not required to run the app.
 
 ```sh
 cd build
-cpack -G DEB      # Linux: podcast-sanity_0.1.0_amd64.deb
-cpack -G WIX      # Windows: podcast-sanity-0.1.0-win64.msi
+cpack -G DEB      # Linux: podcast-sanity_0.2.0_amd64.deb
+cpack -G WIX      # Windows: podcast-sanity-0.2.0-win64.msi
 ```
 
 ---
@@ -63,8 +66,8 @@ Launch `podcast-sanity`. Seven pages in the left rail:
 Record (or load a file, or use the built-in synthetic corpus if you have no
 microphone — the engine path is identical), press *Elabora*, check the
 before/after numbers, export an MP3 at 96 kbps mono, upload it to your hosting,
-and publish through your RSS feed. Spotify and Apple Podcasts read that feed;
-neither has an upload API.
+and publish through your RSS feed. The application does not upload files or
+call a publishing API; use your host's publishing workflow.
 
 The export page offers the same profiles; the recommended one is selected by default.
 
@@ -80,6 +83,9 @@ podcast-sanity-render episode.wav --out master.wav \
     --power-clean --filler cautious --summary --report report.json
 podcast-sanity-render episode.wav --analyze-only
 podcast-sanity-render episode.wav --out episode.mp3 --deliver podcast-voice
+podcast-sanity-render episode.wav --out mix.mp3 --deliver podcast-voice \
+    --music bed.flac --music-level -14 --music-duck -10 --music-tail 2
+podcast-sanity-render --list-profiles
 podcast-sanity-render --gen-corpus demo.wav --profile home --seconds 30
 ```
 
@@ -98,15 +104,22 @@ The renderer exits **3** when the result is not conformant.
 
 ## Verified, not asserted
 
-* 28 unit cases / 1269 checks over the DSP primitives (without the libebur128
+* **11/11 Windows CTest tests pass**: unit, four CLI checks, four end-to-end
+  configurations, GUI and GUI screenshots.
+* 36 unit cases / 1342 checks over the DSP primitives (without the libebur128
   cross-check, which the Windows build does not link).
-* A 10-case / 55-check end-to-end harness that generates synthetic episodes with
+* A 12-case / 66-check end-to-end harness (63 checks at 44.1 kHz) that generates synthetic episodes with
   ground truth, masters them and judges loudness, true peak, filler precision and
   recall, SNR, SI-SDR, determinism and report completeness.
 * A GUI self test that walks all seven pages, masters, exports an MP3 and checks
-  the report contract — run under `xvfb` in CI.
+  the report contract. Linux CI is configured for `xvfb`; release verification
+  on the owner's Debian workstation is pending.
 * Every run emits a JSON response with per-stage timings, real-time factor,
   a parameters hash and the conformance verdict.
+* MSI 0.1.0-to-0.2.0 upgrade, isolated installed-app test and uninstall verified.
+  The MSI is unsigned; signing requires an owner-provided certificate.
+* Subjective listening and interactive recording/preview/installer-finish checks
+  remain pending. Automated screenshots are not a substitute for those checks.
 
 ## License
 

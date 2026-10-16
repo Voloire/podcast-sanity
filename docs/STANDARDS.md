@@ -20,9 +20,10 @@ defaults are, and where the numbers come from.
   and applies the −0.691 dB offset exactly once, to the summed channel energies.
 * Momentary loudness is the 400 ms window value; short term is 3 s.
 * Loudness range (LRA) follows EBU Tech 3342.
-* Multi-channel material is folded to mono, so the reported integrated loudness
-  is that of the mono sum — the same signal the chain processes. See the
-  limitation in `DESIGN-podcast-sanity.md` §7.
+* Multi-channel measurement sums independently K-weighted channel energies;
+  opposite-phase channels do not cancel in the meter. True peak is the maximum
+  per-channel peak. The DSP chain still folds to mono; dual-mono delivery is
+  normalised for its actual channel count. See `DESIGN-podcast-sanity.md` §7.
 
 **True peak** is measured with 4× oversampling and a polyphase FIR, evaluated
 only near candidate peaks (a pruned scan). The unit tests pin the detector with
@@ -67,11 +68,10 @@ them makes `conformance.ok` false with the reason in `warnings`.
 
 ## 3. Encoding and the hosting envelope
 
-Spotify, Apple Podcasts and the other directories do not accept uploads: they
-read a **RSS feed** hosted elsewhere (Buzzsprout, Transistor, Spotify for
-Creators, your own server). The hosting provider is the thing that may re-encode,
-so the file should arrive already inside the envelope the host promises not to
-touch:
+The application publishes no files itself. Export to your hosting provider
+(Buzzsprout, Transistor, Spotify for Creators or your own server) and use its
+publishing workflow and RSS feed. A host may re-encode; the project's recommended
+MP3 envelope is:
 
 * **Mono ≤ 96 kbps MP3**, **stereo ≤ 192 kbps MP3**.
 
@@ -94,10 +94,11 @@ All profiles except `broadcast-r128` keep the input sample rate in the engine.
 MP3 decoding overshoots the encoded peaks by up to about 1 dB. The true peak
 ceiling is enforced on the master before encoding; the decoded MP3 is checked
 by the harness to stay below 0 dBTP. Hosts that re-encode do their own limiting;
-the mono 96 kbps envelope avoids that re-encode.
+the mono 96 kbps envelope is a recommendation, not a guarantee against re-encoding.
 
 Other formats are offered for archival or for hosts that accept them: WAV 16/24
-and 32-bit float, FLAC 24, and Ogg Vorbis. The build hides any format for which
+and 32-bit float, FLAC 24, Ogg Vorbis and Opus. Opus availability is probed through
+libsndfile and does not silently fall back to Vorbis. The build hides any format for which
 no encoder is present rather than offering a button that cannot work.
 
 ---
@@ -113,10 +114,9 @@ overall verdict is false:
 
 * `loudness_ok` — the achieved integrated loudness is within tolerance of the
   target (the engine lands within 0.05 LU on the corpus).
-* `true_peak_ok` — the measured true peak of the **written output** is at or
-  below the ceiling. Normalisation iterates limit → measure → correct so the
-  peak sits *on* the ceiling rather than below it, which is what makes the
-  loudness target reachable without clipping.
+* `true_peak_ok` — the measured true peak of the final unencoded output buffer
+  is within the ceiling tolerance. Output resampling precedes final limiting;
+  the peak may sit below the ceiling when no further limiting is needed.
 * `ok` — both, plus any configured maximum LRA / short-term / momentary.
 
 Nothing else in the report decides conformance: the filler counts and the

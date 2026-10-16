@@ -31,7 +31,7 @@ microphone capture needs the multimedia backend and a platform plugin.
 Install and remove:
 
 ```sh
-sudo apt install ./podcast-sanity_0.1.0_amd64.deb
+sudo apt install ./podcast-sanity_0.2.0_amd64.deb
 sudo apt remove podcast-sanity
 ```
 
@@ -117,6 +117,19 @@ Other validation diagnostics remain enabled.
 ## Codec availability
 
 `src/encode.cpp` compiles the encoders in only when their library is found:
-MP3 via LAME, FLAC and Ogg via libsndfile, WAV always. The export page hides any
+MP3 via LAME, FLAC, Ogg Vorbis and Opus via libsndfile, WAV always. Opus support
+is checked at runtime with `sf_format_check`. The export page hides any
 format whose encoder is missing, so a package that ships without LAME simply
 offers WAV and FLAC instead of failing at the last click.
+
+## 0.2.0 verification status
+
+Windows build, 11/11 CTest tests, original 0.1.0 upgrade, installed self-test and
+uninstall passed. Before/after Task 6.1 payload trimming, the MSI measured
+30,931,917 / 22,906,399 bytes (8,025,518 bytes saved). Later artwork changes alter
+the final MSI size slightly. The original 0.1.0 MSI is preserved separately.
+
+Interactive installer appearance and Finish launch, microphone/preview controls
+and subjective listening still need owner verification. Signing was not run
+without a certificate. Linux packaging, sanitizers and libebur128 checks are
+deferred to the owner's real Debian workstation.
