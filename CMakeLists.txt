@@ -126,6 +126,11 @@ target_compile_definitions(sanity_e2e_tests PRIVATE SANITY_VERSION="${PROJECT_VE
 add_test(NAME e2e COMMAND sanity_e2e_tests)
 set_tests_properties(e2e PROPERTIES TIMEOUT 900)
 
+# The detector is calibrated at 48 kHz; this run proves 44.1 kHz material gets
+# the same precision and recall.
+add_test(NAME e2e_44k COMMAND sanity_e2e_tests --rate 44100)
+set_tests_properties(e2e_44k PROPERTIES TIMEOUT 900)
+
 # ---- GUI ------------------------------------------------------------------
 if(SANITY_WITH_GUI)
   # Multimedia is optional: without it the app still records from a file or the

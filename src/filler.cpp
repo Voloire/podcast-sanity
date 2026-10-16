@@ -49,20 +49,14 @@ double threshold_for(FillerMode mode) {
     return 2.0;
 }
 
-}  // namespace
+constexpr int kDetectRate = 48000;
 
-std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
-                                      FillerMode mode,
-                                      std::vector<FillerCandidate>* candidates) {
+// The calibrated detector itself: everything below runs at 48 kHz, which is
+// the rate the thresholds were tuned at (docs/TESTING.md section 3).
+std::vector<FillerHit> detect_fillers_48k(const std::vector<float>& mono,
+                                          const std::vector<FrameFeat>& feats, FillerMode mode,
+                                          std::vector<FillerCandidate>* candidates) {
     std::vector<FillerHit> hits;
-    if (candidates) candidates->clear();
-    if (mode == FillerMode::Off || mono.size() < static_cast<std::size_t>(sample_rate) / 2)
-        return hits;
-
-    Segmenter seg(SegmenterConfig{sample_rate, 10.0, 35.0});
-    std::vector<FrameFeat> feats;
-    seg.features(mono, feats);
-    if (feats.size() < 20) return hits;
 
     std::vector<double> levels;
     levels.reserve(feats.size());
@@ -73,7 +67,7 @@ std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample
     const double pause_thr = std::max(floor_db + 6.0, peak_db - 40.0);
 
     const std::size_t n = feats.size();
-    const std::size_t hop = static_cast<std::size_t>(segmenter_hop(sample_rate));
+    const std::size_t hop = static_cast<std::size_t>(segmenter_hop(kDetectRate));
     std::size_t i = 0;
     while (i < n) {
         // Segments are runs of *audible* material. Segmenting on voicing instead
@@ -154,17 +148,67 @@ std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample
     // twice, and drop hits that would cut too little.
     std::vector<FillerHit> merged;
     for (const auto& h : hits) {
-        if (!merged.empty() && h.start <= merged.back().end + static_cast<std::size_t>(0.06 * sample_rate)) {
+        if (!merged.empty() &&
+            h.start <= merged.back().end + static_cast<std::size_t>(0.06 * kDetectRate)) {
             if (h.end > merged.back().end) {
                 merged.back().end = h.end;
                 merged.back().score = std::max(merged.back().score, h.score);
-                merged.back().duration_ms = (merged.back().end - merged.back().start) * 1000.0 / sample_rate;
+                merged.back().duration_ms =
+                    (merged.back().end - merged.back().start) * 1000.0 / kDetectRate;
             }
         } else {
             merged.push_back(h);
         }
     }
     return merged;
+}
+
+}  // namespace
+
+std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
+                                      FillerMode mode, std::vector<FillerCandidate>* candidates,
+                                      const std::vector<FrameFeat>* feats) {
+    std::vector<FillerHit> hits;
+    if (candidates) candidates->clear();
+    if (mode == FillerMode::Off || sample_rate <= 0 ||
+        mono.size() < static_cast<std::size_t>(sample_rate) / 2)
+        return hits;
+
+    // The thresholds were calibrated at 48 kHz (docs/TESTING.md section 3).
+    // Other rates are analysed on a resampled copy so the calibration holds,
+    // and the hit positions are mapped back to the caller's rate.
+    const bool native = sample_rate == kDetectRate;
+    std::vector<float> resampled;
+    if (!native) resampled = resample(mono, sample_rate, kDetectRate);
+    const std::vector<float>& work = native ? mono : resampled;
+    std::vector<FrameFeat> local;
+    const std::vector<FrameFeat>* use = nullptr;
+    if (native && feats &&
+        feats->size() == work.size() / static_cast<std::size_t>(segmenter_hop(kDetectRate)))
+        use = feats;
+    if (!use) {
+        Segmenter seg(SegmenterConfig{kDetectRate, 10.0, 35.0});
+        seg.features(work, local);
+        use = &local;
+    }
+    if (use->size() < 20) return hits;
+    hits = detect_fillers_48k(work, *use, mode, candidates);
+    if (!native) {
+        const double k = static_cast<double>(sample_rate) / kDetectRate;
+        auto map = [&](std::size_t s) {
+            return std::min(mono.size(), static_cast<std::size_t>(std::llround(s * k)));
+        };
+        for (FillerHit& h : hits) {
+            h.start = map(h.start);
+            h.end = map(h.end);
+        }
+        if (candidates)
+            for (FillerCandidate& c : *candidates) {
+                c.start = map(c.start);
+                c.end = map(c.end);
+            }
+    }
+    return hits;
 }
 
 std::vector<float> remove_fillers(const std::vector<float>& mono, int sample_rate,

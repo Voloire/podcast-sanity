@@ -308,7 +308,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     // ---------------------------------------------------- 4. Filler Killer
     run_stage(r, "filler", p.filler != FillerMode::Off, audio_ms, [&] {
         std::vector<FillerCandidate> cands;
-        r.fillers = detect_fillers(mono, in_rate, p.filler, &cands);
+        r.fillers = detect_fillers(mono, in_rate, p.filler, &cands, &feats);
         std::size_t removed = 0;
         double seconds = 0.0;
         if (!r.fillers.empty()) {

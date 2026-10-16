@@ -149,10 +149,15 @@ Analysis analyze(const AudioBuffer& b);
 // measurement of `b` and sets a.channels. No-op for mono.
 void apply_multichannel_loudness(Analysis& a, const AudioBuffer& b);
 
-// Filler Killer: hesitation candidate detection (acoustic, no ASR).
+// Filler Killer: hesitation candidate detection (acoustic, no ASR). The
+// detector is calibrated at 48 kHz; other rates are analysed on a resampled
+// copy and the hits are mapped back to `sample_rate`. The optional `feats` are
+// reused only when `sample_rate == 48000` and
+// `feats->size() == mono.size() / 480`; otherwise they are ignored.
 std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
                                       FillerMode mode,
-                                      std::vector<FillerCandidate>* candidates = nullptr);
+                                      std::vector<FillerCandidate>* candidates = nullptr,
+                                      const std::vector<FrameFeat>* feats = nullptr);
 // Cuts the detected regions and joins the two sides with an equal power
 // crossfade, so no digital hole is heard where the hesitation used to be.
 std::vector<float> remove_fillers(const std::vector<float>& mono, int sample_rate,
