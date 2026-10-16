@@ -210,6 +210,7 @@ QPushButton#Rec:hover { background: #D2503F; }
 QPushButton#Transport {
     min-width: 44px; padding: 9px 14px; font-family: "%9"; font-size: 14px;
 }
+QPushButton#Rec, QPushButton#Transport { text-align: left; padding-left: 40px; }
 
 /* ------------------------------------------------------------------ inputs */
 QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {

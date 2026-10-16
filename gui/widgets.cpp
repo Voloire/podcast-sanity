@@ -13,8 +13,65 @@
 #include <cmath>
 
 #include "theme.h"
+#include "studio_widgets.h"
 
 namespace gui {
+
+TransportButton::TransportButton(Glyph g, const QString& text, QWidget* parent)
+    : QPushButton(text, parent), glyph_(g) {
+    setObjectName(g == Glyph::Record ? "Rec" : "Transport");
+    setMinimumHeight(g == Glyph::Record ? 52 : 40);
+    setCursor(Qt::PointingHandCursor);
+}
+void TransportButton::set_glyph(Glyph g) { glyph_ = g; update(); }
+void TransportButton::set_lit(bool on) { lit_ = on; update(); }
+
+void TransportButton::paintEvent(QPaintEvent* e) {
+    QPushButton::paintEvent(e);
+    const Tokens& t = tokens();
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const double s = std::min(18.0, height() * 0.42);
+    const QRectF g(14.0, height() / 2.0 - s / 2.0, s, s);
+    const QColor ink = glyph_ == Glyph::Record ? QColor("#FFFFFF") :
+                       isEnabled() ? t.text : t.text_faint;
+    p.setPen(Qt::NoPen);
+    p.setBrush(ink);
+    switch (glyph_) {
+        case Glyph::Record:
+            if (lit_) {
+                p.setBrush(QColor(255, 255, 255, 90));
+                p.drawEllipse(g.center(), s * 0.7, s * 0.7);
+            }
+            p.setBrush(ink);
+            p.drawEllipse(g.center(), s * 0.42, s * 0.42);
+            break;
+        case Glyph::Pause:
+            p.drawRoundedRect(QRectF(g.left() + s * 0.15, g.top(), s * 0.26, s), 2, 2);
+            p.drawRoundedRect(QRectF(g.right() - s * 0.41, g.top(), s * 0.26, s), 2, 2);
+            break;
+        case Glyph::Play: {
+            QPolygonF tri;
+            tri << QPointF(g.left() + s * 0.2, g.top()) << QPointF(g.right(), g.center().y())
+                << QPointF(g.left() + s * 0.2, g.bottom());
+            p.drawPolygon(tri);
+            break;
+        }
+        case Glyph::Stop:
+            p.drawRoundedRect(g.adjusted(s * 0.1, s * 0.1, -s * 0.1, -s * 0.1), 2, 2);
+            break;
+        case Glyph::Marker: {
+            p.setPen(QPen(ink, 2));
+            p.drawLine(QPointF(g.left() + 2, g.top()), QPointF(g.left() + 2, g.bottom()));
+            QPolygonF flag;
+            flag << QPointF(g.left() + 2, g.top()) << QPointF(g.right(), g.top() + s * 0.25)
+                 << QPointF(g.left() + 2, g.top() + s * 0.5);
+            p.setPen(Qt::NoPen);
+            p.drawPolygon(flag);
+            break;
+        }
+    }
+}
 
 namespace {
 constexpr int kEnvelopeBuckets = 2400;  // fixed so painting stays cheap
@@ -86,6 +143,8 @@ Card::Card(const QString& title, const QString& subtitle, QWidget* parent)
     hl->addLayout(header_trailing_);
 
     chip_ = new Chip(header);
+    led_ = new LedIndicator(header);
+    hl->addWidget(led_);
     hl->addWidget(chip_);
 
     collapse_ = new QPushButton(QStringLiteral("\u25BE"), header);
@@ -117,7 +176,10 @@ void Card::add_row(QWidget* left, QWidget* right) {
     body_->addWidget(row);
 }
 
-void Card::set_state(State s, const QString& text) { chip_->set_state(s, text); }
+void Card::set_state(State s, const QString& text) {
+    chip_->set_state(s, text);
+    led_->set_state(s);
+}
 
 void Card::set_collapsible(bool on) {
     collapsible_ = on;

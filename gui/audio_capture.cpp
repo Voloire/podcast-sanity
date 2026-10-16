@@ -10,6 +10,7 @@
 #include "sanity/audio.hpp"
 #include "sanity/corpus.hpp"
 #include "sanity/loudness.hpp"
+#include "sanity/dsp.hpp"
 
 #if SANITY_HAVE_QTMM
 #include <QAudioDevice>
@@ -232,7 +233,8 @@ void Capture::emit_meter() {
     double lufs = -1e30;
     if (meter_buf_.size() > static_cast<std::size_t>(sample_rate_ / 4))
         lufs = sanity::integrated_lufs(meter_buf_, sample_rate_);
-    emit meter(peak, rms, static_cast<float>(lufs));
+    const float true_peak = static_cast<float>(sanity::gain_to_db(sanity::oversample_4x_peak(meter_buf_)));
+    emit meter(peak, rms, static_cast<float>(lufs), true_peak);
 }
 
 void Capture::pause() {

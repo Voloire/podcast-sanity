@@ -45,7 +45,7 @@ public:
     static bool microphone_available();
 
 signals:
-    void meter(float peak_db, float rms_db, float lufs);
+    void meter(float peak_db, float rms_db, float lufs, float true_peak_db);
     void chunk(const QByteArray& pcm16);
     void stopped();
     void failed(const QString& message);

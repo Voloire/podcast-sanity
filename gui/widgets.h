@@ -13,6 +13,7 @@ class QHBoxLayout;
 class QGridLayout;
 
 namespace gui {
+class LedIndicator;
 
 // --------------------------------------------------------------------- chip
 // A small status pill. Every panel and every long running operation in the app
@@ -58,6 +59,7 @@ private:
     QWidget* body_host_ = nullptr;
     QHBoxLayout* header_trailing_ = nullptr;
     Chip* chip_ = nullptr;
+    LedIndicator* led_ = nullptr;
     QPushButton* collapse_ = nullptr;
     bool collapsible_ = false;
     bool collapsed_ = false;
@@ -146,6 +148,20 @@ private:
     bool show_playhead_ = false;
     QString marker_label_;
     QVector<QPair<double, double>> markers_;
+};
+
+class TransportButton : public QPushButton {
+    Q_OBJECT
+public:
+    enum class Glyph { Record, Pause, Play, Stop, Marker };
+    TransportButton(Glyph g, const QString& text, QWidget* parent = nullptr);
+    void set_glyph(Glyph g);
+    void set_lit(bool on);
+protected:
+    void paintEvent(QPaintEvent*) override;
+private:
+    Glyph glyph_;
+    bool lit_ = false;
 };
 
 // --------------------------------------------------------------- nav button

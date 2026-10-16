@@ -11,6 +11,9 @@ class QVBoxLayout;
 namespace gui {
 
 class Chip;
+class LedIndicator;
+class OnAirSign;
+enum class State;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -24,6 +27,7 @@ private:
     void build_sidebar();
     void build_pages();
     void build_statusbar();
+    void set_global_state(State state, const QString& text);
     void open_audio();
     void save_session();
     void export_quick();
@@ -39,6 +43,8 @@ private:
     QLabel* title_ = nullptr;
     QLabel* subtitle_ = nullptr;
     Chip* state_chip_ = nullptr;
+    LedIndicator* state_led_ = nullptr;
+    OnAirSign* on_air_ = nullptr;
     QLabel* status_ = nullptr;
     QPushButton* theme_btn_ = nullptr;
 };

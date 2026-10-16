@@ -104,9 +104,11 @@ void VuMeter::paintEvent(QPaintEvent*) {
         const bool major = std::fabs(u - std::round(u)) < 1e-9 && (static_cast<int>(std::round(u)) % 5 == 0 || u >= -3.0);
         p.setPen(QPen(u > 0 ? t.danger : t.vu_needle, major ? 2 : 1));
         p.drawLine(at(d, radius - (major ? 10 : 6)), at(d, radius));
-        if (major) {
+        const bool label_tick = unit_ != QStringLiteral("VU") ||
+                                u == -20 || u == -10 || u == -5 || u == 0 || u == 3;
+        if (label_tick) {
             const QString label = u > 0 ? QStringLiteral("+%1").arg(u) : QString::number(u);
-            const QPointF c = at(d, radius - 20);
+            const QPointF c = at(d, radius + 14);
             p.drawText(QRectF(c.x() - 16, c.y() - 8, 32, 16), Qt::AlignCenter, label);
         }
     }
@@ -128,7 +130,7 @@ void VuMeter::paintEvent(QPaintEvent*) {
     QFont unit = font();
     unit.setBold(true);
     p.setFont(unit);
-    p.drawText(face.adjusted(0, face.height() * 0.42, 0, 0), Qt::AlignHCenter | Qt::AlignTop, unit_);
+    p.drawText(QRectF(face.left(), face.bottom() - 32, face.width(), 20), Qt::AlignCenter, unit_);
     p.setFont(font());
     p.setPen(t.text_dim);
     p.drawText(QRectF(r.left() + 12, r.bottom() - 22, r.width() - 24, 18), Qt::AlignLeft | Qt::AlignVCenter, caption_);

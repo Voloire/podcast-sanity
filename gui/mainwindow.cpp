@@ -18,6 +18,7 @@
 #include "pages/pages.h"
 #include "theme.h"
 #include "widgets.h"
+#include "studio_widgets.h"
 
 using namespace sanity;
 
@@ -89,17 +90,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                                        : QStringLiteral("Nessun audio caricato"));
     });
     connect(&AppState::get(), &AppState::mastering_started, this, [this] {
-        state_chip_->set_state(State::Busy, QStringLiteral("Elaborazione"));
+        set_global_state(State::Busy, QStringLiteral("Elaborazione"));
     });
     connect(&AppState::get(), &AppState::mastering_finished, this,
             [this](bool ok, const QString& err) {
                 if (!ok) {
-                    state_chip_->set_state(State::Error, QStringLiteral("Errore"));
+                    set_global_state(err == QStringLiteral("Annullato") ? State::Idle : State::Error,
+                                     err == QStringLiteral("Annullato") ? err : QStringLiteral("Errore"));
                     status_->setText(err);
                     return;
                 }
                 const Report& r = AppState::get().session().report;
-                state_chip_->set_state(r.conformant ? State::Ready : State::Warning,
+                set_global_state(r.conformant ? State::Ready : State::Warning,
                                        r.conformant ? QStringLiteral("Conforme")
                                                     : QStringLiteral("Da rivedere"));
                 select_page(1);
@@ -127,6 +129,8 @@ void MainWindow::build_sidebar() {
     auto* tag = new QLabel(QStringLiteral("registra - pulisci - pubblica"), side);
     tag->setObjectName("BrandSub");
     v->addWidget(tag);
+    on_air_ = new OnAirSign(side);
+    v->addWidget(on_air_, 0, Qt::AlignLeft);
     v->addSpacing(14);
 
     nav_layout_ = v;
@@ -153,7 +157,16 @@ void MainWindow::build_sidebar() {
 
 void MainWindow::build_pages() {
     stack_ = new QStackedWidget(this);
-    stack_->addWidget(new RecordPage(this));
+    auto* recorder = new RecordPage(this);
+    stack_->addWidget(recorder);
+    connect(recorder, &RecordPage::recording_started, this, [this] {
+        on_air_->set_on(true);
+        setWindowTitle(QStringLiteral("podcast-sanity  ON AIR"));
+    });
+    connect(recorder, &RecordPage::recording_stopped, this, [this] {
+        on_air_->set_on(false);
+        setWindowTitle(QStringLiteral("podcast-sanity"));
+    });
     stack_->addWidget(new MasterPage(this));
     stack_->addWidget(new StandardsPage(this));
     stack_->addWidget(new LibraryPage(this));
@@ -167,13 +180,15 @@ void MainWindow::build_statusbar() {
     subtitle_ = new QLabel(QStringLiteral("Nessun audio caricato"));
     subtitle_->setObjectName("Hint");
     state_chip_ = new Chip();
-    state_chip_->set_state(State::Idle, QStringLiteral("In attesa"));
+    state_led_ = new LedIndicator();
+    set_global_state(State::Idle, QStringLiteral("In attesa"));
     auto* host = new QWidget();
     auto* hl = new QHBoxLayout(host);
     hl->setContentsMargins(8, 0, 8, 0);
     hl->setSpacing(12);
     hl->addWidget(subtitle_);
     hl->addWidget(status_, 1);
+    hl->addWidget(state_led_);
     hl->addWidget(state_chip_);
     statusBar()->addWidget(host, 1);
 
@@ -185,6 +200,11 @@ void MainWindow::select_page(int index) {
     if (index < 0 || index >= stack_->count()) return;
     stack_->setCurrentIndex(index);
     for (int i = 0; i < nav_buttons_.size(); i++) nav_buttons_[i]->setChecked(i == index);
+}
+
+void MainWindow::set_global_state(State state, const QString& text) {
+    state_chip_->set_state(state, text);
+    state_led_->set_state(state);
 }
 
 void MainWindow::open_audio() {
