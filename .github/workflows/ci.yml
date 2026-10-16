@@ -68,7 +68,11 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
       - name: Test
-        run: ctest --test-dir build --output-on-failure -R "unit|e2e"
+        run: |
+          # Unit and the base end-to-end case only. The 30 s / 45 s / 44.1 kHz
+          # variants multiply under ASan and would trip their 900 s CTest timeout
+          # on slower machines; the full matrix runs in the linux job.
+          ctest --test-dir build --output-on-failure -R "^(unit|e2e)$"
 
   windows:
     name: Windows (build, test, MSI)
