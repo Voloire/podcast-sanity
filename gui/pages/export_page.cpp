@@ -11,12 +11,14 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
 
 #include "pages/pages.h"
+#include "sanity/distribution.hpp"
 #include "sanity/encode.hpp"
 #include "theme.h"
 #include "widgets.h"
@@ -32,15 +34,16 @@ struct FormatOption {
     int bitrate;
 };
 const FormatOption kFormats[] = {
-    {"MP3 96 kbps (mono, niente re-encode)", sanity::ExportFormat::Mp3, 96},
+    {"MP3 96 kbps mono (recommended)", sanity::ExportFormat::Mp3, 96},
     {"MP3 128 kbps", sanity::ExportFormat::Mp3, 128},
-    {"MP3 192 kbps (stereo, niente re-encode)", sanity::ExportFormat::Mp3, 192},
+    {"MP3 192 kbps stereo", sanity::ExportFormat::Mp3, 192},
     {"MP3 320 kbps", sanity::ExportFormat::Mp3, 320},
     {"WAV 16 bit (master di archivio)", sanity::ExportFormat::Wav16, 0},
     {"WAV 24 bit", sanity::ExportFormat::Wav24, 0},
     {"WAV 32 bit float", sanity::ExportFormat::WavFloat32, 0},
     {"FLAC 24 bit (senza perdita)", sanity::ExportFormat::Flac, 0},
     {"Ogg Vorbis", sanity::ExportFormat::Ogg, 0},
+    {"Opus (Ogg)", sanity::ExportFormat::Opus, 0},
 };
 }  // namespace
 
@@ -61,19 +64,34 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent) {
                                            "dentro l'involucro accettato: mono <= 96 kbps, "
                                            "stereo <= 192 kbps."));
     {
+        profile_ = new QComboBox();
+        for (const sanity::DistributionProfile& d : sanity::distribution_profiles()) {
+            QString label = QString::fromUtf8(d.name);
+            if (d.recommended) label += QStringLiteral(" (recommended)");
+            profile_->addItem(label, QString::fromUtf8(d.id));
+        }
+        profile_->addItem(QStringLiteral("Personalizzato"), QString());
+        connect(profile_, &QComboBox::currentIndexChanged, this, [this] { apply_profile(); });
+        format_card_->add_widget(make_row(QStringLiteral("Profilo di distribuzione"), profile_,
+                                          QStringLiteral("Il profilo imposta formato, canali, "
+                                                         "frequenza, loudness e true peak.")));
+        profile_note_ = new QLabel();
+        profile_note_->setObjectName("Hint");
+        profile_note_->setWordWrap(true);
+        format_card_->add_widget(profile_note_);
         format_ = new QComboBox();
         for (const FormatOption& f : kFormats) {
             if (!sanity::encoder_available(f.format)) continue;
             format_->addItem(QString::fromUtf8(f.label),
                              QVariantList{f.bitrate, static_cast<int>(f.format)});
         }
-        connect(format_, &QComboBox::currentIndexChanged, this, [this] { refresh(); });
+        connect(format_, &QComboBox::currentIndexChanged, this, [this] { custom_profile(); });
         format_card_->add_widget(make_row(QStringLiteral("Formato"), format_));
 
         channels_ = new QComboBox();
         channels_->addItem(QStringLiteral("Mono (podcast di sola voce)"), 1);
         channels_->addItem(QStringLiteral("Stereo"), 2);
-        connect(channels_, &QComboBox::currentIndexChanged, this, [this] { refresh(); });
+        connect(channels_, &QComboBox::currentIndexChanged, this, [this] { custom_profile(); });
         format_card_->add_widget(make_row(QStringLiteral("Canali del master"), channels_,
                                           QStringLiteral("Il mastering processa la somma mono e "
                                                          "duplica sui canali scelti.")));
@@ -81,7 +99,7 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent) {
         rate_ = new QComboBox();
         rate_->addItem(QStringLiteral("48000 Hz"), 48000);
         rate_->addItem(QStringLiteral("44100 Hz"), 44100);
-        connect(rate_, &QComboBox::currentIndexChanged, this, [this] { refresh(); });
+        connect(rate_, &QComboBox::currentIndexChanged, this, [this] { custom_profile(); });
         format_card_->add_widget(make_row(QStringLiteral("Frequenza di uscita"), rate_));
 
         filename_ = new QLineEdit();
@@ -174,6 +192,52 @@ ExportPage::ExportPage(QWidget* parent) : QWidget(parent) {
         }
         do_export();
     });
+    const QString saved = QSettings().value("export/profile",
+        QString::fromUtf8(sanity::recommended_distribution_profile().id)).toString();
+    const int index = profile_->findData(saved);
+    profile_->blockSignals(true);
+    profile_->setCurrentIndex(index >= 0 ? index : 0);
+    profile_->blockSignals(false);
+    apply_profile();
+}
+
+void ExportPage::apply_profile() {
+    const QString id = profile_->currentData().toString();
+    const sanity::DistributionProfile* d = sanity::find_distribution_profile(id.toStdString());
+    if (!d) {
+        profile_note_->setText(QStringLiteral("Impostazioni manuali."));
+        refresh();
+        return;
+    }
+    applying_profile_ = true;
+    sanity::Params p = AppState::get().session().params;
+    sanity::ExportOptions o;
+    sanity::apply_distribution_profile(*d, p, o);
+    AppState::get().set_params(p);
+    for (int i = 0; i < format_->count(); i++) {
+        const QVariantList v = format_->itemData(i).toList();
+        if (v.size() == 2 && v.at(1).toInt() == static_cast<int>(o.format) &&
+            (o.format != sanity::ExportFormat::Mp3 || v.at(0).toInt() == o.mp3_bitrate_kbps)) {
+            format_->setCurrentIndex(i);
+            break;
+        }
+    }
+    const int ch = d->channels > 0 ? d->channels : AppState::get().session().audio.channels;
+    channels_->setCurrentIndex(ch >= 2 ? 1 : 0);
+    if (d->sample_rate > 0) rate_->setCurrentIndex(d->sample_rate == 44100 ? 1 : 0);
+    profile_note_->setText(QString::fromUtf8(d->note));
+    QSettings().setValue("export/profile", id);
+    applying_profile_ = false;
+    refresh();
+}
+
+void ExportPage::custom_profile() {
+    if (!applying_profile_) {
+        profile_->blockSignals(true);
+        profile_->setCurrentIndex(profile_->count() - 1);
+        profile_->blockSignals(false);
+        profile_note_->setText(QStringLiteral("Impostazioni manuali."));
+    }
     refresh();
 }
 
@@ -185,6 +249,18 @@ sanity::ExportOptions ExportPage::options() const {
         o.format = static_cast<sanity::ExportFormat>(v.at(1).toInt());
     }
     return o;
+}
+
+bool ExportPage::master_is_stale() const {
+    const Session& s = AppState::get().session();
+    const int want_ch = channels_->currentData().toInt();
+    const int want_rate = rate_->currentData().toInt();
+    return s.has_report && (s.report.params.out_channels != want_ch ||
+                            s.report.params.out_sample_rate != want_rate ||
+                            s.report.params.target_lufs != s.params.target_lufs ||
+                            s.report.params.target_true_peak_db != s.params.target_true_peak_db ||
+                            s.report.params.normalize != s.params.normalize ||
+                            s.report.params_hash != sanity::params_hash(s.params, s.music.get()));
 }
 
 void ExportPage::refresh() {
@@ -234,6 +310,11 @@ void ExportPage::refresh() {
     }
     if (!sanity::encoder_available(o.format))
         hint = QStringLiteral("Codificatore non disponibile in questa build.");
+    if (master_is_stale())
+        hint += QStringLiteral(" Il master in memoria e a %1 canali / %2 Hz: esportando verra "
+                               "rielaborato.")
+                    .arg(s.report.params.out_channels)
+                    .arg(s.report.params.out_sample_rate);
     hint_->setText(hint);
 
     const QString name = filename_->text().trimmed().isEmpty()
@@ -251,15 +332,18 @@ void ExportPage::refresh() {
 
 void ExportPage::do_export() {
     Session& s = AppState::get().session();
-    if (!s.has_report) {
+    const int want_ch = channels_->currentData().toInt();
+    const int want_rate = rate_->currentData().toInt();
+    const bool stale = master_is_stale();
+    if (!s.has_report || stale) {
         if (!s.has_audio) {
             QMessageBox::information(this, QStringLiteral("Esporta"),
                                      QStringLiteral("Carica o registra prima un audio."));
             return;
         }
         sanity::Params p = s.params;
-        p.out_channels = channels_->currentData().toInt();
-        p.out_sample_rate = rate_->currentData().toInt();
+        p.out_channels = want_ch;
+        p.out_sample_rate = want_rate;
         s.params = p;
         export_after_ = true;
         export_->setEnabled(false);

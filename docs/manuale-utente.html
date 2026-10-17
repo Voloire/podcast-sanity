@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Manuale pratico di Podcast Sanity 0.2.0: registrare, pulire la voce, aggiungere musica ed esportare un episodio.">
+  <title>Podcast Sanity — Manuale utente</title>
+  <style>
+    @font-face{font-family:Ubuntu;src:url('../data/fonts/Ubuntu-Regular.ttf') format('truetype');font-weight:400;font-display:swap}
+    @font-face{font-family:Ubuntu;src:url('../data/fonts/Ubuntu-Bold.ttf') format('truetype');font-weight:700;font-display:swap}
+    :root{color-scheme:light;--paper:#f6f3ec;--card:#fffdf8;--ink:#242b30;--muted:#535e65;--line:#dcd8ce;--accent:#925000;--amber:#f2a33c;--dark:#12171b;--soft:#fff0d8;--green:#215e42}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.7 Ubuntu,system-ui,sans-serif}a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--amber);outline-offset:4px}button{font:inherit;cursor:pointer}.skip{position:absolute;left:16px;top:-100px;background:white;padding:12px;z-index:10}.skip:focus{top:12px}
+    .layout{display:grid;grid-template-columns:270px minmax(0,1fr);max-width:1550px;margin:auto}.sidebar{padding:32px 24px;background:var(--dark);color:#e7e5df;position:sticky;top:0;height:100vh;overflow:auto}.brand{font-weight:700;letter-spacing:.13em;font-size:20px;line-height:1.25}.brand span{color:var(--amber)}.edition{color:#adb6b9;font-size:13px;margin:12px 0 25px}.sidebar nav a{display:block;color:#d5dada;text-decoration:none;padding:7px 8px;border-left:2px solid transparent;font-size:14px}.sidebar nav a:hover{background:#252c30;border-color:var(--amber);color:#fff}.sidebar button{width:100%;background:transparent;color:#fff;border:1px solid #59636b;border-radius:8px;padding:9px;margin-top:24px}.sidebar .hint{font-size:12px;color:#b5bdbf;margin-top:18px}
+    main{min-width:0;padding:44px clamp(22px,5vw,82px) 80px}.hero{background:var(--dark);color:#f7f1e5;border-radius:20px;padding:clamp(26px,4vw,52px);margin-bottom:40px;border-top:5px solid var(--amber)}.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:700;color:var(--accent)}.hero .eyebrow{color:var(--amber)}h1{font-size:clamp(32px,4.3vw,56px);line-height:1.08;letter-spacing:-.035em;margin:16px 0 24px}.hero p{max-width:670px;color:#d0d6d5}.hero .lead{font-size:21px;color:#fff}.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:25px}.pill{border:1px solid #62635d;border-radius:30px;padding:5px 12px;font-size:12px;color:#f7e5c8}
+    section{margin:0 0 50px}section>h2{font-size:29px;line-height:1.25;border-top:1px solid var(--line);padding-top:28px;margin:0 0 20px;letter-spacing:-.025em}h2 small{display:block;font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin-bottom:9px}h3{font-size:21px;line-height:1.3;margin:28px 0 12px}h4{font-size:18px;margin:20px 0 8px}p{margin:0 0 15px}li{margin:7px 0}strong{font-weight:700}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{background:var(--card);border:1px solid var(--line);padding:22px;border-radius:12px}.card h3{margin-top:0}.card p:last-child{margin-bottom:0}.callout{border-left:4px solid var(--amber);background:var(--soft);padding:18px 22px;margin:22px 0;border-radius:0 10px 10px 0}.callout p:last-child{margin-bottom:0}.recipe{border-left:4px solid var(--green);background:#eaf2ec;padding:18px 22px;border-radius:0 10px 10px 0;margin:20px 0}.recipe strong{color:var(--green)}
+    .steps{counter-reset:step;list-style:none;padding:0}.steps>li{counter-increment:step;position:relative;padding:0 0 20px 51px;margin:0}.steps>li:before{content:counter(step);position:absolute;left:0;top:0;display:grid;place-items:center;background:var(--dark);color:var(--amber);width:34px;height:34px;border-radius:50%;font-weight:700}.steps>li>strong{display:block;margin-bottom:4px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:18px 0}table{width:100%;border-collapse:collapse;background:var(--card);font-size:15px}caption{text-align:left;padding:14px;font-weight:700;background:#eee9dd}th,td{text-align:left;vertical-align:top;padding:13px 15px;border-bottom:1px solid var(--line)}th{background:#ede8dc;font-weight:700}tr:last-child td{border-bottom:0}td:first-child{min-width:140px}code,kbd{font-family:ui-monospace,Consolas,monospace;font-size:.87em;background:#eae7df;border-radius:4px;padding:2px 5px;overflow-wrap:anywhere}kbd{border:1px solid #bdbbb5;border-bottom-width:2px;white-space:nowrap}pre{background:#192126;color:#edf1ec;padding:20px;border-radius:10px;overflow:auto;font-size:14px;line-height:1.6}pre code{background:transparent;color:inherit;padding:0;white-space:pre;overflow-wrap:normal}.checklist{list-style:none;padding:0}.checklist li{padding-left:28px;position:relative}.checklist li:before{content:'□';position:absolute;left:0;font-size:22px;line-height:1.3;color:var(--green)}details{border:1px solid var(--line);background:var(--card);border-radius:10px;margin:12px 0;padding:14px 18px}summary{font-weight:700;cursor:pointer}details[open] summary{margin-bottom:12px}dl{margin:0}dt{font-weight:700;margin-top:17px}dd{margin:4px 0 0;color:var(--muted)}.footer{border-top:1px solid var(--line);padding-top:24px;font-size:13px;color:var(--muted)}.toplink{font-size:13px;display:inline-block;margin-top:12px}
+    @media(max-width:1000px){.layout{grid-template-columns:220px minmax(0,1fr)}.sidebar{padding:25px 15px}.grid{grid-template-columns:1fr}main{padding:30px 25px}}
+    @media(max-width:720px){.layout{display:block}.sidebar{position:static;height:auto;padding:22px}.sidebar nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px}.sidebar button{width:auto;padding:8px 18px;margin-top:14px}.sidebar .hint{display:none}.edition{margin-bottom:12px}main{padding:24px 16px}.hero{border-radius:12px}h2{font-size:25px}body{font-size:16px}.table-wrap:before{content:'Scorri la tabella verso destra per leggere tutte le colonne →';display:block;padding:10px;font-size:12px;color:var(--muted)}table{min-width:580px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+    @media print{*{box-shadow:none!important}body{background:white;color:#111;font-size:10.5pt;line-height:1.5}.layout{display:block}.sidebar,.skip,.toplink{display:none}main{padding:0}.hero{background:white;color:#111;border:1px solid #ccc;border-top:4px solid #925000;padding:20px;margin-bottom:20px}.hero p,.hero .lead,.hero .eyebrow{color:#222}h1{font-size:30pt}section{margin-bottom:25px}section>h2{font-size:20pt}h3{font-size:14pt}h2,h3,h4,summary{break-after:avoid}.card,.callout,.recipe,tr,details{break-inside:avoid}.table-wrap{overflow:visible}.pills{display:none}a{color:#222;text-decoration:none}pre{white-space:pre-wrap;background:#eee;color:#111}pre code{white-space:pre-wrap}details>summary{list-style:none}.grid{grid-template-columns:1fr 1fr}@page{margin:17mm}}
+  </style>
+</head>
+<body>
+<a class="skip" href="#contenuto">Vai al contenuto</a>
+<div class="layout">
+  <aside class="sidebar" aria-label="Indice del manuale">
+    <div class="brand">PODCAST<br><span>SANITY</span></div>
+    <p class="edition">MANUALE UTENTE · VERSIONE 0.2.0<br>Edizione italiana · 16 ottobre 2026</p>
+    <nav aria-label="Capitoli">
+      <a href="#inizia">01 · Il primo episodio</a>
+      <a href="#orientamento">02 · Come orientarti</a>
+      <a href="#registrazione">03 · Registrare la voce</a>
+      <a href="#mastering">04 · Pulire e livellare</a>
+      <a href="#filler">05 · Filler Killer</a>
+      <a href="#musica">06 · Musica di sottofondo</a>
+      <a href="#loudness">07 · Volume e standard</a>
+      <a href="#esportazione">08 · Esportare e pubblicare</a>
+      <a href="#sessioni">09 · Salvare e riaprire</a>
+      <a href="#impostazioni">10 · Impostazioni</a>
+      <a href="#diagnostica">11 · Diagnostica</a>
+      <a href="#ricette">12 · Impostazioni pratiche</a>
+      <a href="#problemi">13 · Dubbi e problemi</a>
+      <a href="#glossario">14 · Dizionario semplice</a>
+      <a href="#tastiera">15 · Tastiera e CLI</a>
+    </nav>
+    <button type="button" id="print-button" hidden>Stampa il manuale</button>
+    <p class="hint">Funziona offline. Per cercare una parola usa Ctrl+F nel browser. Le sezioni a scomparsa contengono risposte rapide.</p>
+  </aside>
+  <main id="contenuto">
+    <header class="hero">
+      <div class="eyebrow">Dalla voce registrata al file da pubblicare</div>
+      <h1>Il tuo podcast,<br>un passo alla volta.</h1>
+      <p class="lead">Non devi essere un tecnico audio. Parti dalla guida rapida e consulta il resto quando un pulsante o un numero non ti è chiaro.</p>
+      <p>Podcast Sanity registra o apre un audio, ne pulisce e uniforma la voce, può aggiungere una musica e crea il file finale sul tuo computer.</p>
+      <div class="pills"><span class="pill">Elaborazione locale</span><span class="pill">Guida alle 7 pagine</span><span class="pill">Esempi per principianti</span></div>
+    </header>
+
+    <section id="inizia">
+      <h2><small>01 · Parti da qui</small>Ho un audio: come ottengo un MP3?</h2>
+      <p>Questo è il percorso più semplice per un episodio di sola voce. La musica è facoltativa e puoi aggiungerla dopo aver imparato il flusso di base.</p>
+      <ol class="steps">
+        <li><strong>Apri la registrazione.</strong>Nel menu scegli <b>File → Apri audio…</b>, oppure entra in <b>Sanity Master → Carica file audio…</b>. Scegli il file: compariranno informazioni e forma d’onda.</li>
+        <li><strong>Scegli il risultato che vuoi consegnare.</strong>Vai in <b>Esporta &amp; Pubblica</b> e seleziona il profilo <b>Podcast voice (recommended)</b>. Per la voce imposta MP3 a 96 kbps, mono e −19 LUFS. Controlla <b>Frequenza di uscita</b>: 48000 Hz va bene per iniziare.</li>
+        <li><strong>Parti con una pulizia semplice.</strong>Torna in <b>Sanity Master</b>. Seleziona <b>Voce (parlato)</b>, lascia attiva <b>Normalizzazione loudness + true peak</b> e, per il primo confronto, metti <b>Filler Killer → Disattivato</b>. Su una voce già pulita prova con Power Clean e De-reverb spenti e intensità denoiser a 0; con fruscio prova Power Clean e intensità circa 1,0.</li>
+        <li><strong>Elabora.</strong>Scorri fino alla scheda <b>Risultato</b> e premi <b>Elabora con Sanity Master</b>. Aspetta che l’elaborazione finisca.</li>
+        <li><strong>Ascolta, poi guarda i numeri.</strong>Usa <b>Ascolta originale</b> e <b>Ascolta master</b>. Le parole devono rimanere naturali e chiare. Per il profilo voce il risultato dovrebbe essere vicino a <b>−19 LUFS</b> e il true peak non superiore al tetto di <b>−1 dBTP</b>. Un picco più basso, per esempio −5 dBTP, non è di per sé un problema.</li>
+        <li><strong>Salva il lavoro.</strong>Scegli <b>File → Salva sessione</b> (<kbd>Ctrl</kbd> + <kbd>S</kbd>). Questo conserva il lavoro nella libreria; non è ancora il file MP3 da caricare sul tuo host.</li>
+        <li><strong>Esporta il file finale.</strong>Vai in <b>Esporta &amp; Pubblica</b>, scrivi un nome come <code>episodio-001</code> e premi <b>Esporta il master</b> o <b>Elabora ed esporta</b>. Scegli cartella e nome nella finestra di salvataggio. Se hai cambiato canali, frequenza o parametri, l’app può rielaborare prima di salvare.</li>
+      </ol>
+      <div class="recipe"><strong>La ricetta da ricordare</strong><br>Apri → scegli il profilo voce → regola la pulizia → elabora → ascolta → salva la sessione → esporta.</div>
+      <p>Per pubblicare, carica l’MP3 sul servizio che ospita il tuo podcast. Podcast Sanity prepara il file: non lo carica automaticamente online.</p>
+    </section>
+
+    <section id="orientamento">
+      <h2><small>02 · Capire l’interfaccia</small>Le sette pagine, senza perdersi</h2>
+      <div class="table-wrap"><table><thead><tr><th>Pagina</th><th>La usi per…</th></tr></thead><tbody>
+        <tr><td>Registrazione</td><td>Catturare il microfono, provare il livello e recuperare l’ultima registrazione in cache.</td></tr>
+        <tr><td>Sanity Master</td><td>Aprire l’audio, scegliere pulizia e livellamento, configurare filler e musica, elaborare e ascoltare.</td></tr>
+        <tr><td>Standard &amp; Loudness</td><td>Scegliere i valori di volume finali, leggere la conformità e misurare un file.</td></tr>
+        <tr><td>Libreria / Sessioni</td><td>Riaprire lavori salvati, cercarli, mostrare la loro cartella o eliminarli.</td></tr>
+        <tr><td>Esporta &amp; Pubblica</td><td>Scegliere profilo, formato, canali e frequenza, quindi scrivere il file finale.</td></tr>
+        <tr><td>Impostazioni</td><td>Cambiare tema, cartella della libreria e valori predefiniti.</td></tr>
+        <tr><td>Diagnostica &amp; Test</td><td>Provare il motore su audio sintetico e copiare o salvare un report tecnico.</td></tr>
+      </tbody></table></div>
+      <p>Le pagine condividono lo stesso audio corrente. Passare da una pagina all’altra non crea una nuova sessione e non salva automaticamente. Molte schede sono in basso: <b>scorri la pagina</b> per trovare musica, risultato e pulsante di elaborazione.</p>
+      <div class="grid">
+        <div class="card"><h3>Originale, master, esportazione</h3><p><b>Originale:</b> l’audio caricato o registrato. <b>Master:</b> il risultato dell’elaborazione. <b>Esportazione:</b> una copia del master codificata, per esempio in MP3. Cambiare i controlli richiede una nuova elaborazione per sentire il nuovo risultato.</p></div>
+        <div class="card"><h3>Cosa significano gli stati</h3><p><b>In attesa:</b> nessuna operazione o risultato disponibile. <b>In corso:</b> il programma sta lavorando. <b>Pronto / Conforme:</b> operazione riuscita o valori rispettati. <b>Attenzione / Da rivedere:</b> leggi il messaggio. <b>Errore:</b> l’operazione non è riuscita.</p></div>
+      </div>
+      <div class="callout"><b>“Conforme” non significa “bello da ascoltare”.</b> Significa che le misure rispettano i limiti impostati. Un taglio sbagliato o una voce troppo filtrata si scoprono con l’ascolto.</div>
+    </section>
+
+    <section id="registrazione">
+      <h2><small>03 · Dal microfono al programma</small>Registrare la voce</h2>
+      <ol>
+        <li>Collega il microfono, apri <b>Registrazione</b> e scegli la sorgente microfono.</li>
+        <li>In <b>Ingresso</b> scegli il dispositivo corretto. Per un solo parlante parti da <b>48000 Hz</b> e <b>Mono</b>.</li>
+        <li>Premi <b>Avvia test (3 s)</b> e parla come parlerai durante l’episodio. Leggi il consiglio sul guadagno.</li>
+        <li>Regola il livello del microfono/interfaccia e, se serve, <b>Guadagno in ingresso</b>. Ripeti il test. Come punto di partenza pratico cerca picchi vocali circa fra −12 e −6 dBFS, lasciando spazio alle parole più forti.</li>
+        <li>Premi <b>REC</b>. Il contatore avanza, la forma d’onda si aggiorna e si illumina <b>ON AIR</b>.</li>
+        <li>Usa <b>PAUSA</b> e <b>RIPRENDI</b> se ti interrompi. Premi <b>STOP</b> per chiudere la registrazione e caricarla come audio di lavoro.</li>
+        <li>Salva la sessione, poi passa a <b>Sanity Master</b>.</li>
+      </ol>
+      <div class="callout"><b>Fai il test microfono prima della registrazione importante.</b> Il test è una vera breve registrazione e alla fine diventa l’audio corrente. Allo stesso modo una nuova registrazione sostituisce quella corrente in memoria: salva prima ciò che vuoi conservare.</div>
+      <h3>Come leggere i misuratori</h3>
+      <div class="table-wrap"><table><thead><tr><th>Indicatore</th><th>Come interpretarlo</th></tr></thead><tbody>
+        <tr><td>VU a lancetta</td><td>Segue il livello medio della voce, con un movimento morbido. <b>0 VU corrisponde a −18 dBFS</b>: non è lo zero digitale e non indica saturazione.</td></tr>
+        <tr><td>Picco campione</td><td>Mostra i massimi dei campioni digitali. Più si avvicina a 0 dBFS, meno margine hai.</td></tr>
+        <tr><td>True peak (4x)</td><td>Stima anche i picchi fra i campioni. Può essere più alto del picco campione.</td></tr>
+        <tr><td>PEAK</td><td>La spia del VU si accende quando il picco campione supera −1 dBFS. Riduci il livello se accade spesso.</td></tr>
+        <tr><td>ON AIR</td><td>Indica una registrazione avviata, non una diretta Internet. Nella 0.2.0 rimane acceso anche in pausa: controlla la scritta <b>In pausa</b>.</td></tr>
+      </tbody></table></div>
+      <p>Il “rumore di fondo” del test è il minimo livello RMS rilevato nella breve prova. Se parli per tutti e tre i secondi, non stai misurando una vera pausa silenziosa. Usalo come indicazione, non come analisi acustica della stanza.</p>
+      <h3>Marker, forma d’onda e sorgenti di prova</h3>
+      <p><b>Marker (M)</b> aggiunge un riferimento visivo, utile se sbagli una frase. Non taglia l’audio, non crea capitoli nel file esportato e non è un editor di montaggio. I marcatori della registrazione non sono archiviati come capitoli della sessione.</p>
+      <p>Durante la cattura vedi gli ultimi 30 secondi: lo scorrimento della forma d’onda non elimina le parti registrate prima. Le sorgenti di prova usano un file o il corpus sintetico del programma; non sono una voce reale da pubblicare. Se la sorgente file non ha un percorso disponibile, la modalità di prova può usare il corpus.</p>
+      <h3>Recuperare una registrazione</h3>
+      <p>L’audio in corso viene scritto progressivamente nella cache. Se compare una take recuperabile, premi <b>Recupera</b> e poi <b>File → Salva sessione</b>. Recupera prima di iniziare una nuova REC, che riutilizza i file della registrazione in corso.</p>
+      <p>Nella 0.2.0 il messaggio “take non chiusa” può comparire anche dopo uno STOP regolare, perché la cache è ancora presente. Il recupero non sostituisce una copia salvata nella libreria.</p>
+      <p class="muted">Non è presente un controllo di ascolto in cuffia in tempo reale nell’app. Per sentirti mentre registri usa, se disponibile, il monitoraggio diretto del microfono o dell’interfaccia.</p>
+    </section>
+
+    <section id="mastering">
+      <h2><small>04 · Sanity Master</small>Pulire la voce senza snaturarla</h2>
+      <p>Il mastering rende la registrazione più uniforme e adatta alla consegna. Non serve attivare tutto alla massima intensità. Cambia un controllo alla volta, rielabora e confronta una frase tranquilla, una forte e una pausa.</p>
+      <div class="table-wrap"><table><caption>Controlli della catena di elaborazione</caption><thead><tr><th>Controllo</th><th>Cosa fa</th><th>Quando usarlo / cosa ascoltare</th></tr></thead><tbody>
+        <tr><td>Preset: Voce / Musica</td><td>Seleziona il comportamento di base del motore.</td><td>Per un podcast parlato scegli Voce, anche se aggiungi un sottofondo. “Musica” non trasforma l’app in una workstation multitraccia e non preserva una vera immagine stereo.</td></tr>
+        <tr><td>Power Clean</td><td>Seleziona l’opzione di pulizia combinata; il comando GUI commuta anche De-reverb.</td><td>Controlla sempre l’intensità denoiser: quando è impostata esplicitamente ha precedenza sulla casella Power Clean. Per spegnere il denoiser portala a 0. La riparazione di click/DC non dipende soltanto da questo interruttore.</td></tr>
+        <tr><td>Intensità denoiser</td><td>Regola quanto viene attenuato il rumore; il cursore va da 0 a 2.</td><td>Con Power Clean attivo parti, per esempio, da 0,8–1,2 e aumenta solo se serve. 1,6 è il valore tipico previsto dal programma. Se senti una voce acquosa, metallica o consonanti consumate, riduci.</td></tr>
+        <tr><td>De-reverb</td><td>Prova a ridurre la coda sonora della stanza.</td><td>Utile se la voce sembra distante o “in bagno”. Non può trasformare una stanza molto riverberante in uno studio. Disattivalo se toglie naturalezza.</td></tr>
+        <tr><td>Passa-alto adattivo</td><td>Attenua il rimbombo alle frequenze molto basse.</td><td>Utile per vibrazioni e rumori bassi. Se la voce perde troppo corpo, confronta con il controllo disattivato.</td></tr>
+        <tr><td>Anti-ronzio di rete</td><td>Cerca e attenua il ronzio a 50/60 Hz e le sue armoniche.</td><td>Per un “bzzzz” costante. Non è un eliminatore universale di traffico, vento o altre voci.</td></tr>
+        <tr><td>Riparazione click</td><td>Interviene su piccoli scatti impulsivi.</td><td>Per click brevi. Una registrazione già molto distorta non è completamente recuperabile.</td></tr>
+        <tr><td>De-esser</td><td>Riduce le sibilanti più aggressive.</td><td>Ascolta parole con “s” e “sc”: devono essere meno pungenti, non impastate.</td></tr>
+        <tr><td>Smart Adaptive Leveling</td><td>Rende più simile il livello delle frasi forti e deboli.</td><td>Utile se ti avvicini e allontani dal microfono. <b>Forza leveler</b> da 0 a 100% regola l’intervento; riduci se sparisce l’espressività.</td></tr>
+        <tr><td>Compressore</td><td>Contiene gli sbalzi più rapidi della voce.</td><td>Aiuta a tenere il parlato compatto. Se il respiro o il rumore emergono troppo, confronta senza compressore e con meno livellamento.</td></tr>
+        <tr><td>Normalizzazione loudness + true peak</td><td>Porta il mix al volume di consegna e limita i picchi.</td><td>Lasciala attiva per l’esportazione normale. Non equivale a ripulire il rumore: regola il risultato finale.</td></tr>
+      </tbody></table></div>
+      <h3>Confrontare prima e dopo</h3>
+      <p>Premi <b>Elabora con Sanity Master</b>, poi <b>Ascolta originale</b> e <b>Ascolta master</b>. Il confronto non compensa automaticamente il volume: un audio più forte può sembrare migliore anche quando è più artificiale. Concentrati sulle parole, sulle pause e sulla naturalezza.</p>
+      <p>I misuratori <b>Loudness prima/dopo</b> riassumono l’intero audio, non il livello istantaneo della riproduzione. La forma d’onda è una visualizzazione: non puoi trascinare bordi per tagliare una frase.</p>
+      <p><b>Annulla</b> fa scartare il risultato del lavoro in corso. Il calcolo già avviato può continuare sul worker fino alla fine; per file lunghi attendi che l’attività si assesti prima di chiudere il programma.</p>
+    </section>
+
+    <section id="filler">
+      <h2><small>05 · Esitazioni e tagli automatici</small>Usare il Filler Killer</h2>
+      <p>Un <b>filler</b> è un’esitazione, per esempio un “ehm” isolato. Il programma cerca caratteristiche sonore compatibili con un’esitazione: <b>non trascrive, non capisce il testo e può scambiare una parola per un filler</b>.</p>
+      <div class="table-wrap"><table><thead><tr><th>Modalità</th><th>Come scegliere</th></tr></thead><tbody>
+        <tr><td>Disattivato</td><td>Nessun taglio automatico dei filler. Ottimo per il primo confronto o quando ogni esitazione fa parte del racconto.</td></tr>
+        <tr><td>Prudente</td><td>Prima modalità da provare. Richiede indizi più forti prima di tagliare.</td></tr>
+        <tr><td>Bilanciato</td><td>Accetta più candidati: può stringere il parlato, ma aumenta la necessità di controllare i tagli.</td></tr>
+        <tr><td>Aggressivo</td><td>Taglia più facilmente. Da usare solo dopo un ascolto attento del risultato.</td></tr>
+      </tbody></table></div>
+      <ol>
+        <li>Scegli <b>Prudente</b> e premi <b>Mostra cosa rimuoverebbe</b>.</li>
+        <li>Leggi la tabella: <b>Inizio</b>, <b>Durata</b>, <b>Punteggio</b> e <b>Azione</b>. Un punteggio alto indica una maggiore somiglianza acustica a un filler, non una certezza linguistica.</li>
+        <li>Premi <b>Elabora con Sanity Master</b> per applicare la modalità scelta. La tabella è informativa: non contiene caselle per approvare o annullare singoli tagli.</li>
+        <li>Ascolta i passaggi interessati. Se manca una sillaba o una parola, passa a una modalità meno incisiva oppure disattiva il Filler Killer e rielabora dall’originale.</li>
+      </ol>
+      <p>Le zone evidenziate nella forma d’onda sono un aiuto visivo, non una timeline di montaggio precisa dopo tutti i tagli. La durata finale può diminuire. Anche la modalità Prudente ha prodotto falsi positivi nei test sintetici: non dare per certo che ogni rimozione sia corretta.</p>
+    </section>
+
+    <section id="musica">
+      <h2><small>06 · Sottofondo musicale</small>Mettere la musica sotto la voce</h2>
+      <p>Nella scheda <b>Sottofondo musicale</b> scegli un brano con <b>Scegli musica…</b>. Verifica che compaiano nome e informazioni del file e che <b>Attivo</b> sia selezionato. Puoi tenerlo caricato ma disabilitare il mix togliendo la spunta.</p>
+      <div class="table-wrap"><table><thead><tr><th>Controllo</th><th>Significato pratico</th><th>Esempio</th></tr></thead><tbody>
+        <tr><td>Livello nelle pause</td><td>Livello della musica rispetto alla voce attiva. Più negativo = più piano.</td><td>−14 dB è il valore iniziale del motore. Per un sottofondo più discreto prova −18 o −20 dB.</td></tr>
+        <tr><td>Ducking</td><td>Ulteriore abbassamento della musica mentre viene rilevato parlato.</td><td>−10 dB significa abbassarla di altri 10 dB. Con livello −14, il riferimento durante il parlato tende a −24 dB, dopo l’assestamento.</td></tr>
+        <tr><td>Dissolvenza iniziale</td><td>Quanto impiega la musica a entrare gradualmente.</td><td>1,5 s evita un attacco brusco.</td></tr>
+        <tr><td>Dissolvenza finale</td><td>Quanto dura lo spegnimento graduale alla fine dell’uscita.</td><td>3 s per una chiusura morbida.</td></tr>
+        <tr><td>Inizio sottofondo</td><td>Ritarda l’ingresso della musica nell’episodio.</td><td>5 s lascia i primi cinque secondi senza sottofondo. Non salta i primi cinque secondi del brano e non sposta la voce.</td></tr>
+        <tr><td>Coda dopo la voce</td><td>Aggiunge tempo alla fine del parlato.</td><td>3 s permette alla musica di continuare dopo l’ultima frase. Serve che il brano abbia ancora audio o che la ripetizione sia attiva.</td></tr>
+        <tr><td>Ripeti se più corta dell’episodio</td><td>Riutilizza il brano fino alla durata necessaria, raccordando i passaggi.</td><td>Attivo per un breve loop. Disattivo per riprodurre il brano una sola volta.</td></tr>
+      </tbody></table></div>
+      <div class="recipe"><strong>Una prima prova discreta</strong><br>Livello −18 dB · Ducking −10 dB · Entrata 1,5 s · Uscita 3 s · Coda 3 s · Ripeti attivo. Sono valori di partenza suggeriti, non una garanzia: il risultato dipende dal brano e dalla voce.</div>
+      <h3>Ascoltare l’anteprima</h3>
+      <ol>
+        <li>Carica sia la voce sia la musica.</li>
+        <li>Premi <b>Anteprima 15 s</b>: il programma sceglie un estratto vicino al primo parlato e prepara il mix.</li>
+        <li>Premi <b>Stop</b> per fermare l’ascolto, o impedire l’avvio se l’anteprima è ancora in preparazione.</li>
+        <li>Regola livello e ducking, poi ripeti la prova.</li>
+        <li>Quando sei soddisfatto, esegui il mastering completo e ascolta anche la fine dell’episodio.</li>
+      </ol>
+      <p>L’anteprima è una prova del sottofondo: non ripete tutta la catena di pulizia e taglio, usa un target di −19 LUFS e limita la coda a tre secondi. Può includere la musica anche se la casella <b>Attivo</b> è disabilitata: per il master finale conta quella casella. Con un inizio sottofondo oltre l’estratto potresti non sentirlo nella prova.</p>
+      <p>La musica non risale istantaneamente in ogni piccola pausa: il motore mantiene l’abbassamento per circa 300 ms e poi recupera gradualmente. È intenzionale, per evitare continui saliscendi fra le parole.</p>
+      <div class="callout"><b>Voce e musica vengono sommate in mono.</b> Scegliere “Stereo” in esportazione crea due canali del mix, ma non conserva la spazialità originale del brano. La versione 0.2.0 è pensata soprattutto per il parlato.</div>
+      <p>La sessione conserva il <b>percorso</b> del file musicale, non una sua copia. Se cambi computer o sposti il brano, trasferiscilo e selezionalo nuovamente. Senza ripetizione, un brano breve può finire prima dell’episodio: la dissolvenza finale è legata alla fine dell’uscita, non automaticamente alla fine anticipata del brano.</p>
+    </section>
+
+    <section id="loudness">
+      <h2><small>07 · I numeri che servono davvero</small>Volume, LUFS e conformità</h2>
+      <p>Per iniziare ti bastano due numeri: <b>LUFS</b> per il volume medio percepito dell’episodio e <b>dBTP</b> per i picchi. Con numeri negativi, <b>−16 è più forte di −19</b>; −1 è più vicino al limite digitale di −6.</p>
+      <div class="grid"><div class="card"><h3>Podcast di voce</h3><p><b>−19 LUFS · mono · tetto −1 dBTP</b><br>È il punto di partenza consigliato dal programma. La conformità loudness ammette uno scostamento di ±1 LU.</p></div><div class="card"><h3>Altra consegna</h3><p>Il profilo podcast stereo usa <b>−16 LUFS</b>; broadcast R128 usa <b>−23 LUFS</b>. Usa le specifiche del destinatario quando ti vengono fornite.</p></div></div>
+      <h3>Standard e profilo di distribuzione: qual è la differenza?</h3>
+      <p><b>Standard &amp; Loudness</b> imposta gli obiettivi di misura. <b>Profilo di distribuzione</b> in Esporta combina obiettivi, formato e impostazioni di uscita. Il profilo può cambiare i target che avevi impostato: scegli prima il profilo e poi, solo se necessario, personalizza i valori.</p>
+      <p>Per inserire manualmente i LUFS scegli <b>Personalizzato</b> nella pagina Standard. Non usare il valore 0 nel campo LUFS della GUI: nella 0.2.0 quel campo accetta valori da −40 a −5, anche se il suggerimento parla di automatismo. L’automatismo è previsto nei parametri del motore e in alcuni profili.</p>
+      <div class="table-wrap"><table><thead><tr><th>Parametro avanzato</th><th>Che cosa significa</th></tr></thead><tbody>
+        <tr><td>Loudness range massimo (LRA)</td><td>Limita l’escursione fra parti più tranquille e più forti ai fini della conformità. Viene verificato, non corretto automaticamente da un trattamento LRA dedicato. 0 = nessun vincolo.</td></tr>
+        <tr><td>Short term massimo</td><td>Limite del livello su finestre di circa 3 secondi. Il motore tenta di contenerlo durante la normalizzazione e lo verifica. 0 = nessun vincolo.</td></tr>
+        <tr><td>Momentary massimo</td><td>Analogo limite su circa 400 millisecondi. 0 = nessun vincolo.</td></tr>
+      </tbody></table></div>
+      <p>Se non hai specifiche professionali, lascia questi tre limiti a <b>0</b>. Limiti molto severi possono entrare in conflitto con il volume integrato richiesto. Dopo aver modificato un target, rielabora: i valori “ottenuti” descrivono il master precedente finché non ne crei uno nuovo.</p>
+      <h3>“Misura un file”</h3>
+      <p><b>Scegli un file e misura…</b> analizza senza applicare pulizia e senza esportare. È utile per una prima lettura di una registrazione mono.</p>
+      <div class="callout"><b>Particolarità della 0.2.0:</b> sia “Misura un file” nella GUI sia <code>--analyze-only</code> nella CLI analizzano ancora la somma mono. Il report prodotto dal mastering usa invece le misure multicanale. Per verificare un file stereo già esportato usa un misuratore esterno conforme a BS.1770, per esempio il filtro ebur128 di ffmpeg.</div>
+      <p>La conformità del master viene calcolata <b>prima della codifica MP3</b>. L’MP3 può cambiare leggermente loudness e picchi: il tetto del master non è una promessa di identico picco nel file compresso. Se il destinatario impone un limite sul file consegnato, verifica anche quel file.</p>
+    </section>
+
+    <section id="esportazione">
+      <h2><small>08 · Il file pronto da consegnare</small>Esportare e pubblicare</h2>
+      <div class="table-wrap"><table><caption>I profili di distribuzione</caption><thead><tr><th>Profilo</th><th>Risultato previsto dal profilo</th><th>Uso tipico</th></tr></thead><tbody>
+        <tr><td>Podcast voice<br><code>podcast-voice</code></td><td>MP3 96 kbps, mono, −19 LUFS</td><td>Un episodio parlato: la scelta consigliata.</td></tr>
+        <tr><td>Podcast stereo<br><code>podcast-stereo</code></td><td>MP3 192 kbps, due canali, −16 LUFS</td><td>Una consegna che richiede due canali. Il trattamento resta mono-sum.</td></tr>
+        <tr><td>Archivio WAV<br><code>archive-wav24</code></td><td>WAV 24 bit, target automatico secondo i canali</td><td>Copia non compressa del master.</td></tr>
+        <tr><td>FLAC<br><code>lossless-flac</code></td><td>FLAC 24 bit, target automatico secondo i canali</td><td>Archivio senza perdita, generalmente più piccolo del WAV.</td></tr>
+        <tr><td>Broadcast R128<br><code>broadcast-r128</code></td><td>WAV 24 bit, 48 kHz, −23 LUFS</td><td>Consegna radio/broadcast se richiesta.</td></tr>
+      </tbody></table></div>
+      <p>Tutti i profili indicano un tetto di −1 dBTP. <b>Controlla sempre i menu Canali e Frequenza di uscita della GUI</b>: sono quelli usati quando esporti. La GUI propone 44100 o 48000 Hz; non dare per scontato che la frequenza del sorgente sia conservata solo perché hai scelto un profilo. Modificare formato, canali o frequenza porta la selezione su <b>Personalizzato</b>.</p>
+      <h3>Quale formato scelgo?</h3>
+      <ul>
+        <li><b>MP3:</b> comodo per la pubblicazione, con perdita. Più kbps significa più dati al secondo, non riparazione di un audio registrato male.</li>
+        <li><b>WAV 16/24 bit:</b> senza compressione con perdita; 24 bit è una buona scelta di archivio del master.</li>
+        <li><b>WAV 32 bit float:</b> utile per scambi tecnici e lavorazioni successive; file più grandi.</li>
+        <li><b>FLAC:</b> comprime senza perdita. Deve essere accettato dal software o dal destinatario.</li>
+        <li><b>Ogg Vorbis e Opus:</b> formati con perdita, non equivalenti al FLAC. Nella 0.2.0 un suggerimento generico della pagina può chiamare “senza perdita” i formati non MP3: per Ogg/Opus non è corretto.</li>
+      </ul>
+      <p>I formati disponibili dipendono dai codec inclusi nella build. Per il primo episodio scegli MP3 voce; per conservare un master di buona qualità esporta anche WAV 24 o FLAC.</p>
+      <h3>Salvare concretamente il file</h3>
+      <ol>
+        <li>Imposta il <b>Nome file</b> senza aggiungere a mano l’estensione, per esempio <code>episodio-001</code>.</li>
+        <li>Se vuoi, attiva <b>Esporta anche la traccia non elaborata</b>: viene scritta una copia WAV float con suffisso <code>-originale.wav</code> accanto al master esportato.</li>
+        <li>Premi il pulsante di esportazione. Il percorso mostrato nella pagina è una proposta: la finestra <b>Salva il master</b> ti permette di scegliere la destinazione reale.</li>
+        <li>Aspetta il messaggio <b>File scritto</b> e controlla il percorso indicato.</li>
+      </ol>
+      <p>“Da correggere” è un avviso, non un blocco assoluto all’esportazione. Leggi i valori prima di consegnare. Anche il messaggio di rielaborazione con <code>0 Hz</code> può riferirsi all’impostazione automatica memorizzata, non a un file davvero privo di frequenza.</p>
+      <h3>Pubblicare: che cosa fa l’app?</h3>
+      <p><b>Apri Spotify for Creators</b> apre il sito nel browser. Da lì usi il servizio del tuo host. L’elaborazione audio è offline; aprire volontariamente un sito richiede Internet e non equivale a caricare automaticamente il file.</p>
+      <p><b>Copia lo snippet RSS</b> copia un modello di codice, non un feed pronto. URL, titolo, dimensione e durata sono segnaposto da sostituire. Se il tuo host genera il feed, in genere non ti serve questo comando. I valori 96/192 kbps sono raccomandazioni del programma, non una garanzia che ogni host eviti la ricodifica.</p>
+    </section>
+
+    <section id="sessioni">
+      <h2><small>09 · Conservare il lavoro</small>Sessioni, libreria e passaggio a Linux</h2>
+      <div class="grid"><div class="card"><h3>Salva sessione</h3><p>Conserva il lavoro nella cartella della libreria: sorgente, eventuale master, metadati e report disponibile. Usalo per ritrovare il lavoro nell’app.</p></div><div class="card"><h3>Esporta master</h3><p>Crea il file da ascoltare o consegnare nella cartella scelta. Esportare un MP3 non equivale a salvare una sessione completa.</p></div></div>
+      <p>La libreria predefinita è <code>PodcastSanity</code> nella tua cartella utente, per esempio <code>C:\Users\Nome\PodcastSanity</code> su Windows o <code>/home/nome/PodcastSanity</code> su Linux. Non è la cartella di installazione del programma.</p>
+      <div class="table-wrap"><table><thead><tr><th>File della sessione</th><th>A cosa serve</th></tr></thead><tbody>
+        <tr><td><code>input.wav</code></td><td>Copia audio della sorgente usata per il lavoro.</td></tr>
+        <tr><td><code>master.wav</code></td><td>Master salvato, se l’elaborazione è stata eseguita prima di salvare.</td></tr>
+        <tr><td><code>session.json</code></td><td>Metadati, riepilogo e impostazioni/percorso del sottofondo.</td></tr>
+        <tr><td><code>report.json</code></td><td>Report dell’elaborazione salvata, con parametri e misure.</td></tr>
+      </tbody></table></div>
+      <h3>Riaprire un episodio</h3>
+      <p>Vai in <b>Libreria / Sessioni</b>, seleziona la riga e premi <b>Apri</b> o fai doppio clic. Poi entra in Sanity Master o Esporta. <b>Cerca per nome…</b> filtra l’elenco; <b>Mostra cartella</b> apre i file nel gestore del sistema.</p>
+      <p><b>Esporta di nuovo</b> nella libreria è un comando rapido: scrive un MP3 del master salvato con bitrate consigliato. Per decidere formato e percorso, apri la sessione e usa invece la pagina <b>Esporta &amp; Pubblica</b>.</p>
+      <div class="callout"><b>Le sessioni 0.2.0 non ripristinano ogni controllo come un progetto di montaggio completo.</b> Alla riapertura i parametri generali ripartono dai predefiniti correnti, mentre quelli musicali vengono riletti. Il report visualizzato viene ricostruito dalle misure audio e non riproduce tutta la cronologia originale. Prima di rifare il mastering controlla pulizia, filler e target; consulta il <code>report.json</code> originale per i parametri storici.</div>
+      <h3>Un altro episodio è un altro lavoro</h3>
+      <p>Nella 0.2.0 non c’è un comando “Nuova sessione” dedicato nel menu. Aprire un altro audio mentre una sessione salvata è attiva può mantenere l’identificativo della sessione: un successivo salvataggio può aggiornare la sua cartella. Per iniziare un episodio indipendente, <b>salva il precedente, chiudi e riapri l’app, poi carica il nuovo audio</b>.</p>
+      <p><b>Elimina</b> rimuove definitivamente la cartella della sessione selezionata, dopo conferma; non la sposta nel cestino. Prima di eliminare, verifica di avere le copie che vuoi conservare.</p>
+      <h3>Trasferire il lavoro su un altro computer</h3>
+      <ol>
+        <li>Salva la sessione e copia l’intera cartella della libreria, mantenendo le sottocartelle.</li>
+        <li>Copia separatamente i brani musicali usati come sottofondo.</li>
+        <li>Sul nuovo computer scegli la libreria copiata da <b>Impostazioni → Libreria → Sfoglia…</b> oppure da <b>Libreria → Cambia cartella…</b>.</li>
+        <li>Apri la sessione. Un percorso Windows del brano non funziona su Linux: seleziona di nuovo il file musicale.</li>
+        <li>Controlla i parametri prima di rielaborare; salva nuovamente dopo le modifiche.</li>
+      </ol>
+      <p>Cambiare la cartella della libreria <b>non sposta automaticamente i file</b>. Se l’elenco diventa vuoto, potresti aver selezionato una cartella diversa da quella che contiene le sessioni.</p>
+    </section>
+
+    <section id="impostazioni">
+      <h2><small>10 · Personalizzare l’ambiente</small>Impostazioni</h2>
+      <ul>
+        <li><b>Tema:</b> Studio (scuro e ambra), Chiaro o Scuro. Il cambio è immediato e riguarda l’aspetto, non il suono. Puoi cambiarlo anche da <b>Vista → Cambia tema</b>.</li>
+        <li><b>Valori predefiniti:</b> preset, modalità filler, Power Clean e profilo di distribuzione. Premi <b>Salva i predefiniti</b>. Il comando aggiorna anche i parametri correnti del motore: controllali prima di elaborare di nuovo.</li>
+        <li><b>Profilo predefinito:</b> viene memorizzato per la pagina di esportazione; se l’app è già aperta, seleziona esplicitamente il profilo anche in Esporta per applicarlo al lavoro corrente.</li>
+        <li><b>Libreria:</b> usa <b>Sfoglia…</b> per scegliere e applicare la cartella. La cache indicata sotto contiene le registrazioni temporanee, non l’archivio dei tuoi episodi.</li>
+        <li><b>Ripristina:</b> azzera le preferenze salvate e riporta, fra l’altro, tema e cartella libreria ai valori iniziali. I file nelle vecchie cartelle non vengono trasferiti né eliminati da questo pulsante.</li>
+      </ul>
+    </section>
+
+    <section id="diagnostica">
+      <h2><small>11 · Quando qualcosa non torna</small>Diagnostica &amp; Test</h2>
+      <p>Non devi usare questa pagina per ogni episodio. Serve a controllare il comportamento del motore e a raccogliere informazioni quando chiedi assistenza.</p>
+      <ul>
+        <li><b>Esegui harness:</b> genera tre esempi sintetici (studio, casa e situazione difficile) e li elabora. Non è un giudizio automatico sulla tua voce e non richiede il microfono.</li>
+        <li><b>Durata:</b> 12, 20 o 30 secondi per ogni esempio; maggiore durata significa più lavoro.</li>
+        <li><b>Misura il master corrente / Report dell’ultimo master:</b> mostrano il report disponibile del tuo master. Non rielaborano l’episodio e non aprono una nuova misurazione del file esportato.</li>
+        <li><b>Copia / Salva…:</b> copiano o salvano il report JSON mostrato. Dopo un harness, il testo riguarda l’ultimo esempio sintetico: torna al report del tuo master se vuoi inviare quello.</li>
+      </ul>
+      <p><b>Precisione</b> indica quante rimozioni corrispondono ai filler noti del test; <b>Recall</b> quanti filler noti sono stati trovati. <b>SNR</b> e <b>SI-SDR</b> sono misure tecniche di rapporto fra segnale, rumore e riferimento. <b>Deterministico</b> significa che due esecuzioni identiche hanno prodotto lo stesso audio.</p>
+      <p><b>RTF</b> è il tempo di elaborazione diviso per la durata dell’audio: 0,2 corrisponde indicativamente a 12 secondi di lavoro per un minuto di audio. Non è una promessa sui tempi di ogni registrazione.</p>
+      <div class="recipe"><strong>Per descrivere un problema</strong><br>Indica versione, sistema operativo, formato e durata della sorgente, pulsante usato, testo dell’errore e parametri principali. Aggiungi il report del master interessato e, se utile, uno screenshot.</div>
+    </section>
+
+    <section id="ricette">
+      <h2><small>12 · Tre punti di partenza</small>Quali impostazioni provo?</h2>
+      <div class="grid">
+        <article class="card"><h3>Voce già pulita</h3><p>Preset Voce; Power Clean e De-reverb disattivati e intensità denoiser a 0 per il primo confronto; normalizzazione attiva; filler inizialmente disattivato. Prova il leveler se le frasi hanno volumi diversi. Esporta con Podcast voice.</p></article>
+        <article class="card"><h3>Voce con fruscio o ventola</h3><p>Preset Voce; Power Clean attivo; denoiser inizialmente circa 1,0. De-reverb solo se serve per la stanza. Ascolta bene le consonanti e riduci la pulizia se diventano artificiali.</p></article>
+        <article class="card"><h3>Voce con musica discreta</h3><p>Prima regola la voce. Poi aggiungi il brano: livello −18 dB, ducking −10 dB, entrata 1,5 s, uscita e coda 3 s. Prova l’anteprima e poi ascolta il master completo.</p></article>
+        <article class="card"><h3>Intervista con volumi irregolari</h3><p>Prova Smart Adaptive Leveling e compressore. Lascia i filler spenti nel primo passaggio. Se hai voci separate su due canali, considera che il motore le somma: non offre controlli indipendenti per i due ospiti.</p></article>
+      </div>
+      <h3>Prima di pubblicare</h3>
+      <ul class="checklist">
+        <li>Ho ascoltato inizio, fine, una frase forte e una pausa.</li>
+        <li>Con Filler Killer attivo ho controllato che non manchino parole.</li>
+        <li>La musica non copre la voce e la fine non è brusca.</li>
+        <li>Il profilo, i canali e la frequenza corrispondono alla consegna.</li>
+        <li>Ho letto la conformità del master dopo l’ultima elaborazione.</li>
+        <li>Ho salvato la sessione e verificato il percorso del file esportato.</li>
+      </ul>
+    </section>
+
+    <section id="problemi">
+      <h2><small>13 · Risposte rapide</small>“Perché succede questo?”</h2>
+      <details><summary>Ho cambiato un cursore, ma il suono non cambia.</summary><p>I controlli non applicano effetti dal vivo al master già calcolato. Premi nuovamente <b>Elabora con Sanity Master</b>, poi ascolta il nuovo risultato.</p></details>
+      <details><summary>Non trovo il pulsante Elabora o la musica.</summary><p>Scorri la pagina Sanity Master: dopo materiale, forma d’onda, catena e filler trovi sottofondo e risultato. La sidebar cambia pagina; lo scorrimento raggiunge le schede della pagina corrente.</p></details>
+      <details><summary>La voce suona metallica, vuota o troppo piatta.</summary><p>Riduci il denoiser, confronta con De-reverb disattivato e, se il problema è la dinamica, riduci la forza del leveler o prova senza compressore. Cambia una cosa per volta.</p></details>
+      <details><summary>Mancano parole o il ritmo è diventato innaturale.</summary><p>Metti Filler Killer su Disattivato e rielabora. Se così il problema sparisce, il detector ha tagliato un elemento che volevi conservare. Non puoi ripristinare un singolo taglio dalla tabella: usa una modalità meno incisiva o un editor esterno per un montaggio manuale.</p></details>
+      <details><summary>La musica non si sente.</summary><p>Controlla che il brano sia caricato, Attivo selezionato e l’inizio sottofondo non troppo ritardato. Prova un livello meno negativo, per esempio da −24 a −18 dB. Se manca solo nell’anteprima, il ritardo può superare la durata dell’estratto. Se manca dopo aver riaperto una sessione, riseleziona il file musicale.</p></details>
+      <details><summary>La musica copre le parole.</summary><p>Abbassa Livello nelle pause (per esempio da −14 a −18 dB) e/o rendi il ducking più negativo (da −6 a −10 dB). Il detector può sbagliare le zone di parlato: verifica ascoltando il master.</p></details>
+      <details><summary>Ho scelto stereo, ma non sento più la spazialità.</summary><p>La 0.2.0 elabora la somma mono e la duplica sui canali di uscita. Non è un guasto del lettore. Per mantenere una vera immagine stereo serve una catena di elaborazione stereo diversa.</p></details>
+      <details><summary>Il risultato non è conforme.</summary><p>Controlla profilo e target, lascia la normalizzazione attiva, rielabora e leggi gli avvisi nel risultato. Se hai imposto LRA, short term o momentary, controlla che siano davvero richiesti. Un limite LRA non attiva automaticamente una correzione dedicata.</p></details>
+      <details><summary>Esportando parte di nuovo l’elaborazione.</summary><p>È previsto quando il master non è aggiornato rispetto a canali, frequenza o parametri. Attendi la finestra di salvataggio; non è necessario avviare contemporaneamente un altro mastering.</p></details>
+      <details><summary>Ho salvato, ma non trovo l’MP3.</summary><p><b>Salva sessione</b> crea i file della sessione nella libreria. Per l’MP3 devi usare <b>Esporta &amp; Pubblica</b> e completare la finestra di salvataggio. La cartella finale è quella mostrata nel messaggio “File scritto”.</p></details>
+      <details><summary>Non vedo il microfono o la registrazione fallisce.</summary><p>Controlla che sia collegato e disponibile nel sistema, le autorizzazioni del microfono e il dispositivo selezionato. Riavvia l’app dopo averlo collegato. Se il problema è il formato, prova mono a 48000 Hz o il formato accettato dal dispositivo. Il registratore non passa automaticamente a un altro microfono a metà take.</p></details>
+      <details><summary>Non sento l’anteprima o il master.</summary><p>Controlla uscita audio e volume del sistema, e che l’app disponga del backend multimediale. Se è indicata “Riproduzione non disponibile”, esporta e ascolta con un lettore esterno. La preparazione di una riproduzione lunga può richiedere tempo.</p></details>
+      <details><summary>Posso chiudere subito dopo REC o dopo Annulla?</summary><p>Per una registrazione premi prima STOP e salva la sessione. Dopo Annulla il risultato viene scartato, ma il calcolo può continuare: attendi la fine dell’attività prima di uscire. Per una copia da consegnare completa anche l’esportazione.</p></details>
+    </section>
+
+    <section id="glossario">
+      <h2><small>14 · Dizionario da tenere a portata di mano</small>Le parole dell’audio, tradotte</h2>
+      <dl>
+        <dt>Mastering / master</dt><dd>Preparazione finale del suono / audio risultante, pronto per essere codificato e consegnato.</dd>
+        <dt>Gain / guadagno</dt><dd>Quanto alzi o abbassi il livello. +6 dB aumenta, −6 dB riduce. Non recupera dettagli già persi per saturazione.</dd>
+        <dt>dBFS</dt><dd>Livello rispetto al massimo digitale. 0 dBFS è il limite dei campioni in un segnale digitale normalizzato.</dd>
+        <dt>dBTP / true peak</dt><dd>Picco stimato del segnale ricostruito, anche fra i campioni. Per questo può superare il picco campione.</dd>
+        <dt>LUFS / loudness integrato</dt><dd>Misura del volume medio percepito sull’audio secondo uno standard. Non è il volume delle casse.</dd>
+        <dt>LU / LRA</dt><dd>LU misura una differenza di loudness; LRA descrive la variabilità del livello nel programma.</dd>
+        <dt>RMS / VU</dt><dd>RMS è una misura di livello medio del segnale; il VU a lancetta ne offre una rappresentazione più lenta e leggibile.</dd>
+        <dt>Clipping / saturazione</dt><dd>Il segnale è troppo alto e i picchi vengono troncati. Può produrre distorsione: meglio evitarlo durante la registrazione.</dd>
+        <dt>Denoise / denoiser</dt><dd>Riduzione del rumore / filtro che la applica.</dd>
+        <dt>De-reverb / riverbero</dt><dd>Riduzione delle riflessioni della stanza / coda sonora dopo la voce.</dd>
+        <dt>De-esser / sibilanti</dt><dd>Controllo delle consonanti acute più pungenti, soprattutto “s”.</dd>
+        <dt>Leveler / compressore / limiter</dt><dd>Tre azioni diverse: uniformare le frasi, contenere gli sbalzi e impedire ai picchi di superare un tetto.</dd>
+        <dt>Ducking / fade / loop / tail</dt><dd>Abbassamento automatico sotto la voce / dissolvenza / ripetizione / coda dopo il parlato.</dd>
+        <dt>Mono / stereo / dual mono</dt><dd>Un canale / due canali che possono differire / lo stesso segnale copiato in due canali. Il master a due canali di questa versione è dual mono.</dd>
+        <dt>Hz / kHz / sample rate</dt><dd>Frequenza di campionamento: 48000 Hz = 48 kHz. Indica quanti campioni al secondo rappresentano il suono, non il volume.</dd>
+        <dt>Bit / kbps</dt><dd>La profondità in bit riguarda la precisione dei campioni PCM; kbps è il flusso di dati di un formato compresso. 24 bit e 96 kbps non sono due valori dello stesso parametro.</dd>
+        <dt>Lossless / lossy</dt><dd>Senza perdita (FLAC; WAV PCM non compresso) / con perdita (MP3, Vorbis, Opus). Convertire un MP3 in WAV non ricrea l’informazione già persa.</dd>
+        <dt>Report JSON / hash</dt><dd>Resoconto leggibile anche da programmi / identificatore dei parametri. Non devi modificarli per usare l’app.</dd>
+        <dt>Host / RSS</dt><dd>Servizio che ospita i file del podcast / feed che descrive gli episodi e dove trovarli.</dd>
+      </dl>
+    </section>
+
+    <section id="tastiera">
+      <h2><small>15 · Per andare più veloce</small>Scorciatoie e comandi facoltativi</h2>
+      <div class="table-wrap"><table><thead><tr><th>Scorciatoia</th><th>Azione</th></tr></thead><tbody>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Apri audio.</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td>Salva la sessione.</td></tr>
+        <tr><td><kbd>F5</kbd></td><td>Avvia il mastering con i parametri correnti.</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Aggiungi un marker nella pagina di registrazione, quando la scorciatoia è attiva.</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>Nel browser, cerca una parola in questo manuale.</td></tr>
+      </tbody></table></div>
+      <h3>La CLI: facoltativa, non necessaria per iniziare</h3>
+      <p><code>podcast-sanity-render</code> è la versione a riga di comando dello stesso motore. Gli esempi presuppongono che l’eseguibile sia nel PATH. Su Windows puoi usare il suo percorso completo con <code>&amp;</code> in PowerShell; su Linux, <code>./podcast-sanity-render</code> se sei nella cartella che lo contiene.</p>
+      <pre><code># Elenco dei profili
+podcast-sanity-render --list-profiles
+
+# Analisi rapida della somma mono, senza elaborazione
+podcast-sanity-render "voce.wav" --analyze-only
+
+# MP3 voce con report
+podcast-sanity-render "voce.wav" --out "episodio.mp3" --deliver podcast-voice --report "episodio.json"
+
+# Pulizia e filler prudenti
+podcast-sanity-render "voce.wav" --out "pulito.mp3" --deliver podcast-voice --power-clean --filler cautious
+
+# Voce con sottofondo
+podcast-sanity-render "voce.wav" --out "mix.mp3" --deliver podcast-voice --music "musica.wav" --music-level -18 --music-duck -10 --music-tail 3
+
+# Tutte le opzioni della propria build
+podcast-sanity-render --help</code></pre>
+      <p>La CLI non legge necessariamente gli stessi predefiniti salvati dalla GUI: indica esplicitamente le opzioni che vuoi usare. Il codice di uscita <b>3</b> segnala un risultato non conforme; leggi il report invece di interpretarlo come un crash.</p>
+    </section>
+
+    <footer class="footer">
+      <p><b>Ambito del manuale.</b> Descrive il codice della versione 0.2.0 sul branch review-2026-10-16. Le particolarità indicate sono quelle osservabili nell’implementazione, anche dove un suggerimento dell’interfaccia è più generico. La verifica dell’app sulla workstation Debian e alcuni controlli interattivi e d’ascolto sono ancora da completare.</p>
+      <p>Il contenuto e lo stile di questa pagina sono locali. I font Ubuntu vengono cercati nella cartella <code>data/fonts</code> del repository; se copi solo l’HTML, il browser usa un font di sistema e il manuale resta leggibile. Nessuna risorsa Internet è necessaria. Per una copia cartacea usa la stampa del browser.</p>
+      <a class="toplink" href="#contenuto">Torna all’inizio ↑</a>
+    </footer>
+  </main>
+</div>
+<script>
+  const printButton = document.getElementById('print-button');
+  printButton.hidden = false;
+  printButton.addEventListener('click', () => window.print());
+  let closedBeforePrint = [];
+  window.addEventListener('beforeprint', () => {
+    closedBeforePrint = [...document.querySelectorAll('details:not([open])')];
+    closedBeforePrint.forEach(item => { item.open = true; });
+  });
+  window.addEventListener('afterprint', () => {
+    closedBeforePrint.forEach(item => { item.open = false; });
+    closedBeforePrint = [];
+  });
+</script>
+</body>
+</html>

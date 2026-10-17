@@ -90,7 +90,7 @@ Severity: **P1** data loss, memory safety or a wrong delivery; **P2** wrong beha
 
 | ID | Sev | Where | Finding |
 |----|-----|-------|---------|
-| F38 | P2 | working tree | The Windows port (MSVC flags, codec detection, windeployqt, MSI, Unicode export test, `--list-audio-devices`) is uncommitted: 10 modified and 7 untracked files, while `origin/master` moved on to `757d6f1` with overlapping changes to CMake, CI and the icon. Reconcile and baseline first (Task 0.1). |
+| F38 | P2 | working tree | The Windows port (MSVC flags, codec detection, windeployqt, MSI, Unicode export test, `--list-audio-devices`) is uncommitted: 10 modified and 7 untracked files. Baseline it first. |
 | F39 | P2 | `CMakeLists.txt:220`, `packaging/windows.rc.in` | `CPACK_PACKAGE_CONTACT "Voloire <dev@voloire.local>"` puts a fake e-mail into the MSI metadata; the policy is name only. |
 | F40 | P3 | `build-windows/.../wix.log` | WiX ICE61 (same-version upgrade range), ICE69 (shortcut component), ICE90/91 (per-user directories) warnings. Harmless for a per-user MSI; document as accepted. |
 | F41 | P3 | `CMakeLists.txt:176-179`, `packaging/deploy-windows.cmake.in` | Payload carries `opengl32sw.dll` (20 MB), TLS, network-information and generic plugins the app never loads. |
@@ -131,19 +131,6 @@ Closes F38, F43.
 **Files:**
 - Create: `.gitattributes`
 - Commit as-is: `.github/workflows/ci.yml`, `CMakeLists.txt`, `README.md`, `docs/TESTING.md`, `gui/main.cpp`, `packaging/README.md`, `src/corpus.cpp`, `src/encode.cpp`, `src/io_wav.cpp`, `tests/test_main.cpp`, `data/podcast-sanity.ico`, `packaging/THIRD-PARTY.md`, `packaging/build-windows.ps1`, `packaging/deploy-windows.cmake.in`, `packaging/generate-icon.py`, `packaging/test-windows-msi.ps1`, `packaging/windows.rc.in`, and this plan under `docs/superpowers/plans/`.
-
-- [ ] **Step 0: Reconcile the local working tree with `origin/master`**
-
-`origin/master` is at `757d6f1` ("Fix parallel segmenter lifetime bug found by ASan; make the Windows build real"), pushed from the Ubuntu machine after the local Windows work started. It touches `src/dsp.cpp` (the F03 fix, keep it), `.github/workflows/ci.yml` (vcpkg triplet `x64-windows-static-md`), `CMakeLists.txt` (find_path fallback for lame/sndfile, `qt_generate_deploy_app_script`) and adds `data/podcast-sanity.ico`. The local uncommitted tree changes the same three files and has its own `.ico`.
-
-```powershell
-git fetch origin
-git stash push -u -m "windows-port-wip"
-git reset --hard origin/master
-git stash pop
-```
-
-Resolve the conflicts with these rules: `src/dsp.cpp` takes the remote version unchanged; `data/podcast-sanity.ico` takes the local file (the one the tested MSI used); `CMakeLists.txt` keeps the local structure (find_package CONFIG for vcpkg, `SANITY_REQUIRE_CODECS`, windeployqt POST_BUILD, `deploy-windows.cmake.in`, per-user WIX block) and additionally keeps the remote `find_path`/`find_library` fallback block for lame and sndfile; drop the remote `qt_generate_deploy_app_script` block (the install-tree deployment is done by `deploy-windows.cmake.in`); `.github/workflows/ci.yml` keeps the local Windows job (dynamic `x64-windows` triplet with the CMake 4.3 wheel and the MSI install test), which is the configuration the local MSI was built and tested with. After resolving: `git stash drop`, then rebuild with `.\packaging\build-windows.ps1` before Step 1.
 
 - [ ] **Step 1: Confirm the tree builds and tests pass as it stands**
 
@@ -524,15 +511,10 @@ git commit -m "Corpus: clamp the hesitation vowel to the take length (heap overr
 
 ### Task 1.3: Fix the atomic lifetime in the feature thread pool
 
-Closes F03. Already fixed upstream by `757d6f1` (the counter was moved before the `try` block); after Task 0.1 Step 0 that fix is in the tree. This task verifies it and simplifies the fallback path.
+Closes F03.
 
 **Files:**
 - Modify: `src/dsp.cpp:594-623`
-
-- [ ] **Step 0: Verify the upstream fix is present**
-
-Run: `Select-String -Path src\dsp.cpp -Pattern 'std::atomic<int> next'`
-Expected: the declaration is before `try {`. Either way apply Step 1: it keeps the counter outside the block and replaces the `parallel` flag with draining the counter on this thread.
 
 - [ ] **Step 1: Restructure so every object the threads touch outlives the join**
 

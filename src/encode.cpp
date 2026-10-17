@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <vector>
 
 #include "sanity/dsp.hpp"
@@ -50,18 +51,22 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
     AudioBuffer src = in;
     if (!lame_rate_ok(src.sample_rate)) {
         const int target = nearest_lame_rate(src.sample_rate);
-        Resampler rs(src.sample_rate, target);
+        const std::size_t frames = src.frames();
+        std::vector<std::vector<float>> chans(static_cast<std::size_t>(src.channels));
+        for (int c = 0; c < src.channels; c++) {
+            std::vector<float> one(frames);
+            for (std::size_t i = 0; i < frames; i++)
+                one[i] = src.data[i * static_cast<std::size_t>(src.channels) + c];
+            chans[static_cast<std::size_t>(c)] = resample(one, src.sample_rate, target);
+        }
         AudioBuffer rsb;
         rsb.sample_rate = target;
-        rsb.channels = 1;
-        rsb.data = rs.process(to_mono(src));
+        rsb.channels = src.channels;
+        rsb.resize_frames(chans[0].size());
+        for (int c = 0; c < rsb.channels; c++)
+            for (std::size_t i = 0; i < chans[0].size(); i++)
+                rsb.data[i * static_cast<std::size_t>(rsb.channels) + c] = chans[static_cast<std::size_t>(c)][i];
         src = rsb;
-        if (src.channels != 2) {
-            AudioBuffer dup = mono_to_channels(target, rsb.data, 2);
-            src = dup;
-        } else {
-            src = mono_to_channels(target, rsb.data, 2);
-        }
     }
     if (src.channels != 1 && src.channels != 2) {
         // Fold anything wider down; MP3 has no surround here.
@@ -86,7 +91,11 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
         return false;
     }
 
+#ifdef _WIN32
+    FILE* f = _wfopen(std::filesystem::u8path(path).c_str(), L"wb");
+#else
     FILE* f = std::fopen(path.c_str(), "wb");
+#endif
     if (!f) {
         lame_close(gfp);
         err = "cannot open " + path;
@@ -97,7 +106,6 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
     const int chunk = 1152;
     std::vector<unsigned char> out(static_cast<std::size_t>(chunk) * 5 / 4 + 7200);
     const float* left = src.channel(0);
-    const float* right = src.channels > 1 ? src.channel(1) : nullptr;
     std::size_t pos = 0;
     bool ok = true;
     while (pos < frames) {
@@ -107,8 +115,8 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
             written = lame_encode_buffer_ieee_float(gfp, left + pos, left + pos, n, out.data(),
                                                     static_cast<int>(out.size()));
         } else {
-            written = lame_encode_buffer_ieee_float(gfp, left + pos, right + pos, n, out.data(),
-                                                    static_cast<int>(out.size()));
+            written = lame_encode_buffer_interleaved_ieee_float(
+                gfp, src.data.data() + 2 * pos, n, out.data(), static_cast<int>(out.size()));
         }
         if (written < 0) {
             ok = false;
@@ -142,6 +150,10 @@ bool encode_sndfile(const std::string& path, const AudioBuffer& in, const Export
     switch (opt.format) {
         case ExportFormat::Flac: info.format = SF_FORMAT_FLAC | SF_FORMAT_PCM_24; break;
         case ExportFormat::Ogg: info.format = SF_FORMAT_OGG | SF_FORMAT_VORBIS; break;
+        // SF_FORMAT_OPUS is an enum constant (since libsndfile 1.0.29), not a
+        // macro, so the preprocessor cannot test for it; the runtime
+        // sf_format_check below and in encoder_available() decide support.
+        case ExportFormat::Opus: info.format = SF_FORMAT_OGG | SF_FORMAT_OPUS; break;
         case ExportFormat::Wav24: info.format = SF_FORMAT_WAV | SF_FORMAT_PCM_24; break;
         case ExportFormat::WavFloat32: info.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT; break;
         default: info.format = SF_FORMAT_WAV | SF_FORMAT_PCM_16; break;
@@ -151,7 +163,11 @@ bool encode_sndfile(const std::string& path, const AudioBuffer& in, const Export
         err = "unsupported format";
         return false;
     }
+#ifdef _WIN32
+    SNDFILE* sf = sf_wchar_open(std::filesystem::u8path(path).c_str(), SFM_WRITE, &info);
+#else
     SNDFILE* sf = sf_open(path.c_str(), SFM_WRITE, &info);
+#endif
     if (!sf) {
         err = sf_strerror(nullptr);
         return false;
@@ -161,7 +177,7 @@ bool encode_sndfile(const std::string& path, const AudioBuffer& in, const Export
         sf_command(sf, SFC_SET_VBR_ENCODING_QUALITY, &q, sizeof(double));
     }
     if (opt.format == ExportFormat::Flac) {
-        double level = opt.flac_compression;
+        double level = std::clamp(opt.flac_compression, 0, 8) / 8.0;
         sf_command(sf, SFC_SET_COMPRESSION_LEVEL, &level, sizeof(double));
     }
     const std::size_t frames = in.frames();
@@ -197,6 +213,18 @@ bool encoder_available(ExportFormat f) {
 #else
             return false;
 #endif
+        case ExportFormat::Opus:
+#if SANITY_HAVE_SNDFILE
+            {
+                SF_INFO info{};
+                info.samplerate = 48000;
+                info.channels = 1;
+                info.format = SF_FORMAT_OGG | SF_FORMAT_OPUS;
+                return sf_format_check(&info) != 0;
+            }
+#else
+            return false;
+#endif
     }
     return false;
 }
@@ -209,6 +237,7 @@ std::string export_extension(ExportFormat f) {
         case ExportFormat::Flac: return ".flac";
         case ExportFormat::Ogg: return ".ogg";
         case ExportFormat::Mp3: return ".mp3";
+        case ExportFormat::Opus: return ".opus";
     }
     return ".wav";
 }
@@ -220,6 +249,7 @@ std::string export_format_name(const ExportOptions& o) {
         case ExportFormat::WavFloat32: return "WAV 32 bit float";
         case ExportFormat::Flac: return "FLAC 24 bit";
         case ExportFormat::Ogg: return "Ogg Vorbis";
+        case ExportFormat::Opus: return "Opus";
         case ExportFormat::Mp3:
             return "MP3 " + std::to_string(o.mp3_bitrate_kbps) + " kbps";
     }
@@ -231,7 +261,8 @@ ExportOptions export_options_for_path(const std::string& path) {
     const std::string e = lower_ext(path);
     if (e == ".mp3") o.format = ExportFormat::Mp3;
     else if (e == ".flac") o.format = ExportFormat::Flac;
-    else if (e == ".ogg" || e == ".opus") o.format = ExportFormat::Ogg;
+    else if (e == ".ogg") o.format = ExportFormat::Ogg;
+    else if (e == ".opus") o.format = ExportFormat::Opus;
     else o.format = ExportFormat::Wav16;
     return o;
 }
@@ -258,7 +289,7 @@ bool encode_audio(const std::string& path, const AudioBuffer& in, const ExportOp
 #if SANITY_HAVE_SNDFILE
                 return encode_sndfile(path, in, opt, err);
 #else
-                return wav_write(path, in, true, &err);
+                return wav_write_pcm24(path, in, &err);
 #endif
             }
             return wav_write(path, in, false, &err);
@@ -271,10 +302,11 @@ bool encode_audio(const std::string& path, const AudioBuffer& in, const ExportOp
 #endif
         case ExportFormat::Flac:
         case ExportFormat::Ogg:
+        case ExportFormat::Opus:
 #if SANITY_HAVE_SNDFILE
             return encode_sndfile(path, in, opt, err);
 #else
-            err = "this build has no FLAC/Ogg encoder";
+            err = "this build has no FLAC/Ogg/Opus encoder";
             return false;
 #endif
     }

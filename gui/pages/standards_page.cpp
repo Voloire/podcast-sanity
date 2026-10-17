@@ -32,8 +32,8 @@ struct Standard {
 };
 
 const Standard kStandards[] = {
-    {"Apple Podcasts - voce mono", -19.0, -1.0,
-     "Apple Authoring Practices: -19 LUFS mono, true peak -1 dBTP."},
+    {"Apple Podcasts - voce mono (recommended)", -19.0, -1.0,
+     "Apple Authoring Practices: -19 LUFS mono, true peak -1 dBTP. E il profilo di distribuzione consigliato."},
     {"Apple Podcasts - stereo", -16.0, -1.0,
      "Apple Authoring Practices: -16 LUFS stereo, true peak -1 dBTP."},
     {"Spotify (target di riproduzione)", -14.0, -1.0,
@@ -241,8 +241,7 @@ void StandardsPage::refresh_conformance() {
     peak_chip_->set_state(r.conformant_true_peak ? State::Ready : State::Error,
                           r.conformant_true_peak ? QStringLiteral("True peak OK")
                                                  : QStringLiteral("True peak alto"));
-    const bool lra_ok = p.max_lra <= 0.0 || r.after.lra <= p.max_lra;
-    lra_chip_->set_state(lra_ok ? State::Ready : State::Warning,
+    lra_chip_->set_state(r.conformant_lra ? State::Ready : State::Warning,
                          QStringLiteral("LRA %1 LU").arg(fmt_db(r.after.lra)));
     conform_card_->set_state(r.conformant ? State::Ready : State::Warning,
                              r.conformant ? QStringLiteral("Conforme")
@@ -257,11 +256,11 @@ void StandardsPage::measure_file() {
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Scegli un audio"), QStandardPaths::writableLocation(
                                                     QStandardPaths::MusicLocation),
-        QStringLiteral("Audio (*.wav *.flac *.ogg *.mp3);;Tutti i file (*)"));
+        QString::fromStdString(sanity::audio_read_filter()));
     if (path.isEmpty()) return;
     sanity::AudioBuffer b;
     std::string err;
-    if (!sanity::wav_read(path.toStdString(), b, err)) {
+    if (!sanity::audio_read(path.toStdString(), b, err)) {
         measured_->setText(QStringLiteral("Impossibile leggere: %1")
                                .arg(QString::fromStdString(err)));
         measure_card_->set_state(State::Error, QStringLiteral("Errore"));

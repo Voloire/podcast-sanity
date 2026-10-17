@@ -28,6 +28,13 @@ Tokens make_light() {
     t.meter_low = QColor("#7C9082");
     t.meter_mid = QColor("#B0A24F");
     t.meter_high = QColor("#B5643F");
+    t.panel_hi = QColor("#F7F5EE");
+    t.panel_lo = QColor("#E7E3D6");
+    t.vu_face = QColor("#FFFDF6");
+    t.vu_needle = QColor("#2B302A");
+    t.led_off = QColor("#C9C4B6");
+    t.rec = QColor("#C0453A");
+    t.glow = QColor(124, 144, 130, 70);
     return t;
 }
 
@@ -51,6 +58,43 @@ Tokens make_dark() {
     t.meter_low = QColor("#9CB8A2");
     t.meter_mid = QColor("#CFC168");
     t.meter_high = QColor("#D08A5F");
+    t.panel_hi = QColor("#262C27");
+    t.panel_lo = QColor("#1B201C");
+    t.vu_face = QColor("#E9ECE2");
+    t.vu_needle = QColor("#181C19");
+    t.led_off = QColor("#333B34");
+    t.rec = QColor("#D2503F");
+    t.glow = QColor(156, 184, 162, 80);
+    return t;
+}
+
+Tokens make_studio() {
+    Tokens t;
+    t.bg = QColor("#0E1012");
+    t.bg_alt = QColor("#15181B");
+    t.card = QColor("#1A1E22");
+    t.card_alt = QColor("#14171A");
+    t.sidebar = QColor("#0B0D0F");
+    t.border = QColor("#2A3036");
+    t.text = QColor("#E6E3DA");
+    t.text_dim = QColor("#A4A79E");
+    t.text_faint = QColor("#6C716A");
+    t.accent = QColor("#F2A33C");
+    t.accent_soft = QColor("#3A2C14");
+    t.accent_text = QColor("#141414");
+    t.success = QColor("#46D37A");
+    t.warning = QColor("#F2C14E");
+    t.danger = QColor("#E0463A");
+    t.meter_low = QColor("#46D37A");
+    t.meter_mid = QColor("#F2C14E");
+    t.meter_high = QColor("#E0463A");
+    t.panel_hi = QColor("#262C31");
+    t.panel_lo = QColor("#15191C");
+    t.vu_face = QColor("#F4EAD2");
+    t.vu_needle = QColor("#2B2B2B");
+    t.led_off = QColor("#3A3F44");
+    t.rec = QColor("#E0463A");
+    t.glow = QColor(242, 163, 60, 90);
     return t;
 }
 
@@ -59,6 +103,8 @@ Tokens make_dark() {
 const Tokens& tokens() {
     static const Tokens light = make_light();
     static const Tokens dark = make_dark();
+    static const Tokens studio = make_studio();
+    if (g_mode == ThemeMode::Studio) return studio;
     return g_mode == ThemeMode::Light ? light : dark;
 }
 
@@ -67,12 +113,23 @@ ThemeMode mode() { return g_mode; }
 
 QString mono_family() {
     static const QString family = [] {
-        const QStringList wanted = {"JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono",
+        const QStringList wanted = {"Ubuntu Mono", "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono",
                                     "Menlo", "Consolas", "monospace"};
         const QStringList have = QFontDatabase::families();
         for (const QString& w : wanted)
             if (have.contains(w)) return w;
         return QString("monospace");
+    }();
+    return family;
+}
+
+QString ui_family() {
+    static const QString family = [] {
+        const QStringList have = QFontDatabase::families();
+        for (const QString& w : {QStringLiteral("Ubuntu"), QStringLiteral("Inter"),
+                                 QStringLiteral("Segoe UI"), QStringLiteral("Noto Sans")})
+            if (have.contains(w)) return w;
+        return QString("sans-serif");
     }();
     return family;
 }
@@ -86,7 +143,7 @@ QString style_sheet() {
 QWidget {
     background: %1;
     color: %3;
-    font-family: "Inter", "Segoe UI", "Ubuntu", "Noto Sans", sans-serif;
+    font-family: "%18";
     font-size: 13px;
 }
 QToolTip {
@@ -153,6 +210,7 @@ QPushButton#Rec:hover { background: #D2503F; }
 QPushButton#Transport {
     min-width: 44px; padding: 9px 14px; font-family: "%9"; font-size: 14px;
 }
+QPushButton#Rec, QPushButton#Transport { text-align: left; padding-left: 40px; }
 
 /* ------------------------------------------------------------------ inputs */
 QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
@@ -239,11 +297,26 @@ QGroupBox {
     border: 1px solid %6; border-radius: 10px; margin-top: 10px; padding-top: 10px;
 }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; color: %4; }
+QFrame#Sidebar {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 %19, stop:1 %7);
+    border: none; border-right: 1px solid %6;
+}
+QFrame#CardHeader {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %19, stop:1 %20);
+    border: none; border-bottom: 1px solid %6;
+    border-top-left-radius: 12px; border-top-right-radius: 12px;
+}
+QPushButton#Nav { padding-left: 42px; }
+QPushButton#Nav:checked { background: %8; color: %3; font-weight: 600; border-left: 3px solid %10; padding-left: 39px; }
+QLabel#PageTitle { font-size: 24px; font-weight: 700; letter-spacing: 0.5px; background: transparent; }
+QLabel#BrandTitle { font-size: 17px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; background: transparent; }
+QLabel#Mono, QPlainTextEdit, QTextEdit { font-family: "%9"; }
 )")
                         .arg(c(t.bg), c(t.card), c(t.text), c(t.text_dim), c(t.text_faint),
                              c(t.border), c(t.sidebar), c(t.accent_soft), mono_family(),
                              c(t.accent), c(t.bg_alt), c(t.accent_text), c(t.accent), c(t.danger),
-                             c(t.card_alt), c(t.card_alt), c(t.warning));
+                              c(t.card_alt), c(t.card_alt), c(t.warning), ui_family(),
+                              c(t.panel_hi), c(t.panel_lo));
     return qss;
 }
 

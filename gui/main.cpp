@@ -3,16 +3,24 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QSettings>
+#include <QScrollArea>
 #include <QStandardPaths>
 #include <QStyleFactory>
 #include <QTimer>
+#include <QIcon>
+#if SANITY_HAVE_QTMM
+#include <QAudioDevice>
+#include <QMediaDevices>
+#endif
 
 #include <cstdio>
 
 #include "app_state.h"
 #include "mainwindow.h"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/encode.hpp"
 #include "sanity/master.hpp"
 #include "theme.h"
@@ -30,6 +38,10 @@ public:
         : window_(w), seconds_(seconds), shots_(shots_dir) {}
 
     void start() {
+        if (!shots_.isEmpty()) {
+            gui::set_mode(gui::ThemeMode::Studio);
+            gui::AppState::get().theme_changed();
+        }
         // Walk the pages: constructing and painting each one exercises the
         // signal wiring.
         step(0);
@@ -77,7 +89,22 @@ private:
             b.data = item.degraded;
             st.set_audio(b, QString(), QStringLiteral("corpus"));
         }
-        st.start_mastering(st.session().params);
+        if (!st.session().has_music) {
+            auto music = std::make_shared<sanity::AudioBuffer>(sanity::AudioBuffer::zeros(44100, 2, 44100 * 3));
+            for (std::size_t i = 0; i < music->frames(); i++) {
+                const double t = static_cast<double>(i) / 44100;
+                const float v = static_cast<float>(0.2 * (std::sin(sanity::kTwoPi * 220 * t) +
+                    0.6 * std::sin(sanity::kTwoPi * 330 * t) + 0.4 * std::sin(sanity::kTwoPi * 440 * t)));
+                music->data[2 * i] = v;
+                music->data[2 * i + 1] = v;
+            }
+            st.set_music_buffer(music, QStringLiteral("Accordo di prova"));
+        }
+        sanity::Params p = st.session().params;
+        p.music_bed.enabled = true;
+        p.music_bed.tail_s = 1.0;
+        st.set_params(p);
+        st.start_mastering(p);
     }
 
     void verify(bool ok, const QString& err) {
@@ -86,6 +113,13 @@ private:
             std::exit(3);
         }
         const sanity::Report& r = gui::AppState::get().session().report;
+        bool bed_staged = false;
+        for (const auto& stage : r.stages)
+            if (stage.name == "music_bed" && stage.enabled) bed_staged = true;
+        if (!bed_staged) {
+            std::fprintf(stderr, "selftest: music bed stage missing\n");
+            std::exit(7);
+        }
         std::printf("selftest: lufs=%.2f tp=%.2f conformant=%s fillers=%zu stages=%zu rtf=%.3f\n",
                     r.after.integrated_lufs, r.after.true_peak_db, r.conformant ? "yes" : "no",
                     r.fillers_removed, r.stages.size(), r.rtf);
@@ -95,12 +129,12 @@ private:
         }
 
         // Export through the real encoder and check the file really exists.
+        sanity::Params unused = gui::AppState::get().session().params;
         sanity::ExportOptions o;
-        o.format = sanity::ExportFormat::Mp3;
-        o.mp3_bitrate_kbps = sanity::recommended_mp3_bitrate(
-            gui::AppState::get().session().mastered.channels);
+        sanity::apply_distribution_profile(sanity::recommended_distribution_profile(), unused, o);
         const QString path = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-                                 .filePath("podcast-sanity-selftest.mp3");
+                                 .filePath(QStringLiteral("podcast-sanity-selftest") +
+                                           QString::fromStdString(sanity::export_extension(o.format)));
         std::string e;
         if (sanity::encoder_available(o.format)) {
             if (!sanity::encode_audio(path.toStdString(), gui::AppState::get().session().mastered,
@@ -111,7 +145,7 @@ private:
             const qint64 size = QFileInfo(path).size();
             std::printf("selftest: wrote %s (%lld bytes, %s)\n", path.toUtf8().constData(),
                         static_cast<long long>(size),
-                        sanity::export_format_name(o).c_str());
+                        sanity::distribution_label(sanity::recommended_distribution_profile()).c_str());
             if (size < 1024) {
                 std::fprintf(stderr, "selftest: exported file looks empty\n");
                 std::exit(6);
@@ -136,13 +170,26 @@ private:
     // The page list is static so the deferred callbacks never hold a pointer to
     // a stack array that has already gone out of scope.
     static const int* after_pages() {
-        static const int pages[] = {2, 4, 6};
+        static const int pages[] = {1, 1, 2, 4, 6};
         return pages;
     }
 
     void capture_after(int i) {
         const int* pages = after_pages();
-        if (i >= 3) {
+        if (i >= 5) {
+            if (!shots_.isEmpty()) {
+                QDir(shots_).mkpath(QStringLiteral("themes"));
+                window_->select_page(0);
+                for (auto mode : {gui::ThemeMode::Light, gui::ThemeMode::Dark}) {
+                    gui::set_mode(mode);
+                    gui::AppState::get().theme_changed();
+                    QApplication::processEvents();
+                    grab(0, mode == gui::ThemeMode::Light ? QStringLiteral("themes/light")
+                                                        : QStringLiteral("themes/dark"));
+                }
+                gui::set_mode(gui::ThemeMode::Studio);
+                gui::AppState::get().theme_changed();
+            }
             std::printf("selftest: OK\n");
             std::fflush(stdout);
             QApplication::quit();
@@ -150,8 +197,18 @@ private:
         }
         const int page = pages[i];
         window_->select_page(page);
+        if (page == 1) {
+            auto* card = window_->findChild<QWidget*>(i == 0 ? QStringLiteral("MusicBedCard")
+                                                            : QStringLiteral("MasterResultCard"));
+            for (QWidget* parent = card ? card->parentWidget() : nullptr; parent; parent = parent->parentWidget()) {
+                if (auto* scroll = qobject_cast<QScrollArea*>(parent)) {
+                    scroll->ensureWidgetVisible(card);
+                    break;
+                }
+            }
+        }
         QTimer::singleShot(320, [this, i, page] {
-            grab(page, QStringLiteral("mastered"));
+            grab(page, i == 0 ? QStringLiteral("music") : QStringLiteral("mastered"));
             capture_after(i + 1);
         });
     }
@@ -170,8 +227,13 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName(QStringLiteral("Voloire"));
     QApplication::setOrganizationDomain(QStringLiteral("voloire.local"));
     QApplication::setDesktopFileName(QStringLiteral("podcast-sanity"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/podcast-sanity.ico")));
 
     // Fusion looks the same everywhere, which is what the QSS theme expects.
+    for (const char* f : {":/fonts/Ubuntu-Regular.ttf", ":/fonts/Ubuntu-Medium.ttf",
+                          ":/fonts/Ubuntu-Bold.ttf", ":/fonts/UbuntuMono-Regular.ttf"})
+        QFontDatabase::addApplicationFont(QString::fromLatin1(f));
+    QApplication::setFont(QFont(gui::ui_family(), 10));
     if (QStyleFactory::keys().contains(QStringLiteral("Fusion")))
         QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
@@ -193,13 +255,32 @@ int main(int argc, char** argv) {
     parser.addOption(selftest);
     parser.addOption(seconds);
     parser.addOption(shots);
+    QCommandLineOption devices(QStringLiteral("list-audio-devices"),
+                               QStringLiteral("Elenca gli ingressi audio e termina."));
+    parser.addOption(devices);
     parser.addPositionalArgument(QStringLiteral("audio"),
                                  QStringLiteral("File WAV da aprire all'avvio."));
     parser.process(app);
+    if (parser.isSet(devices)) {
+#if SANITY_HAVE_QTMM
+        const auto inputs = QMediaDevices::audioInputs();
+        for (const auto& device : inputs) {
+            const auto format = device.preferredFormat();
+            std::printf("%s%s: %d Hz, %d channels\n", device.isDefault() ? "* " : "  ",
+                        device.description().toUtf8().constData(), format.sampleRate(),
+                        format.channelCount());
+        }
+        std::fflush(stdout);
+        return inputs.isEmpty() ? 1 : 0;
+#else
+        return 1;
+#endif
+    }
 
     QSettings st;
-    gui::set_mode(st.value("ui/theme", 0).toInt() == 1 ? gui::ThemeMode::Dark
-                                                       : gui::ThemeMode::Light);
+    const int theme = st.value("ui/theme", 2).toInt();
+    gui::set_mode(theme == 0 ? gui::ThemeMode::Light : theme == 1 ? gui::ThemeMode::Dark
+                                                               : gui::ThemeMode::Studio);
 
     gui::MainWindow window;
     app.setStyleSheet(gui::style_sheet());
@@ -210,7 +291,7 @@ int main(int argc, char** argv) {
     if (!rest.isEmpty() && QFileInfo::exists(rest.first())) {
         sanity::AudioBuffer b;
         std::string err;
-        if (sanity::wav_read(rest.first().toStdString(), b, err)) {
+        if (sanity::audio_read(rest.first().toStdString(), b, err)) {
             gui::AppState::get().set_audio(b, rest.first(), QStringLiteral("file"));
             gui::AppState::get().session().name = QFileInfo(rest.first()).completeBaseName();
         }

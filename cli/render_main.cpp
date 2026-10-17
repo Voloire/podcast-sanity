@@ -11,7 +11,9 @@
 
 #include "sanity/audio.hpp"
 #include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/encode.hpp"
 #include "sanity/loudness.hpp"
 #include "sanity/master.hpp"
 #include "sanity/metrics.hpp"
@@ -30,6 +32,7 @@ void usage() {
         "\n"
         "Usage:\n"
         "  podcast-sanity-render IN.wav --out OUT.wav [options]\n"
+        "  podcast-sanity-render IN.wav --out episode.mp3 --deliver podcast-voice\n"
         "  podcast-sanity-render --gen-corpus OUT.wav [--profile studio|home|rough]\n"
         "  podcast-sanity-render IN.wav --analyze-only\n"
         "\n"
@@ -52,8 +55,21 @@ void usage() {
         "Filler Killer:\n"
         "  --filler off|cautious|balanced|aggressive   (default off)\n"
         "\n"
+        "Music bed:\n"
+        "  --music FILE               Mix a music file under the voice\n"
+        "  --music-level DB           Level relative to speech in pauses (default -14)\n"
+        "  --music-duck DB            Extra attenuation during speech (default -10)\n"
+        "  --music-tail S             Extend the output by S seconds\n"
+        "  --music-offset S           Start the bed S seconds into the episode\n"
+        "  --music-fade-in S          Fade in duration (default 1.5)\n"
+        "  --music-fade-out S         Fade out duration (default 3)\n"
+        "  --music-no-loop            Play the music once\n"
+        "\n"
         "Output:\n"
         "  --float                     Write 32 bit float WAV (default 16 bit)\n"
+        "  --deliver PROFILE           Apply a distribution profile (target, channels, format)\n"
+        "  --list-profiles             List the distribution profiles and exit\n"
+        "  --no-normalize              Skip loudness normalisation\n"
         "  --report FILE.json          Write the quality report\n"
         "  --summary                   Print the human readable report\n"
         "  --print-json                Print the JSON report to stdout\n"
@@ -78,6 +94,8 @@ struct Args {
     std::string clean_out;
     std::string gen_corpus;
     std::string profile = "home";
+    std::string deliver;
+    std::string music;
     double seconds = 20.0;
     bool female = false;
     bool analyze_only = false;
@@ -85,17 +103,32 @@ struct Args {
     bool summary = false;
     bool quiet = false;
     bool float_out = false;
+    bool list_profiles = false;
     Params params;
 };
 
 bool parse(int argc, char** argv, Args& a) {
     for (int i = 1; i < argc; i++) {
         const std::string k = argv[i];
+        auto value = [&](std::string& v) {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "option %s needs a value\n", k.c_str());
+                return false;
+            }
+            v = argv[++i];
+            return true;
+        };
         auto next = [&](double& v) {
-            if (i + 1 < argc) v = std::atof(argv[++i]);
+            std::string s;
+            if (!value(s)) return false;
+            v = std::atof(s.c_str());
+            return true;
         };
         auto nexti = [&](int& v) {
-            if (i + 1 < argc) v = std::atoi(argv[++i]);
+            std::string s;
+            if (!value(s)) return false;
+            v = std::atoi(s.c_str());
+            return true;
         };
         if (k == "--help" || k == "-h") {
             usage();
@@ -103,72 +136,95 @@ bool parse(int argc, char** argv, Args& a) {
         } else if (k == "--version" || k == "-V") {
             std::printf("podcast-sanity-render %s\n", SANITY_VERSION);
             std::exit(0);
-        } else if (k == "--out")
-            a.out = argv[++i];
-        else if (k == "--report")
-            a.report = argv[++i];
-        else if (k == "--truth")
-            a.truth = argv[++i];
-        else if (k == "--clean-out")
-            a.clean_out = argv[++i];
-        else if (k == "--gen-corpus")
-            a.gen_corpus = argv[++i];
-        else if (k == "--profile")
-            a.profile = argv[++i];
-        else if (k == "--seconds")
-            next(a.seconds);
-        else if (k == "--female")
+        } else if (k == "--out") {
+            if (!value(a.out)) return false;
+        } else if (k == "--report") {
+            if (!value(a.report)) return false;
+        } else if (k == "--truth") {
+            if (!value(a.truth)) return false;
+        } else if (k == "--clean-out") {
+            if (!value(a.clean_out)) return false;
+        } else if (k == "--gen-corpus") {
+            if (!value(a.gen_corpus)) return false;
+        } else if (k == "--profile") {
+            if (!value(a.profile)) return false;
+        } else if (k == "--deliver") {
+            if (!value(a.deliver)) return false;
+        } else if (k == "--list-profiles") {
+            a.list_profiles = true;
+        } else if (k == "--music") {
+            if (!value(a.music)) return false;
+            a.params.music_bed.enabled = true;
+        } else if (k == "--music-level") {
+            if (!next(a.params.music_bed.bed_level_db)) return false;
+        } else if (k == "--music-duck") {
+            if (!next(a.params.music_bed.duck_db)) return false;
+        } else if (k == "--music-tail") {
+            if (!next(a.params.music_bed.tail_s)) return false;
+        } else if (k == "--music-offset") {
+            if (!next(a.params.music_bed.offset_s)) return false;
+        } else if (k == "--music-fade-in") {
+            if (!next(a.params.music_bed.fade_in_s)) return false;
+        } else if (k == "--music-fade-out") {
+            if (!next(a.params.music_bed.fade_out_s)) return false;
+        } else if (k == "--music-no-loop") {
+            a.params.music_bed.loop = false;
+        } else if (k == "--seconds") {
+            if (!next(a.seconds)) return false;
+        } else if (k == "--female") {
             a.female = true;
-        else if (k == "--analyze-only")
+        } else if (k == "--analyze-only") {
             a.analyze_only = true;
-        else if (k == "--print-json")
+        } else if (k == "--print-json") {
             a.print_json = true;
-        else if (k == "--summary")
+        } else if (k == "--summary") {
             a.summary = true;
-        else if (k == "--quiet")
+        } else if (k == "--quiet") {
             a.quiet = true;
-        else if (k == "--float")
+        } else if (k == "--float") {
             a.float_out = true;
-        else if (k == "--preset") {
-            const std::string v = argv[++i];
+        } else if (k == "--preset") {
+            std::string v;
+            if (!value(v)) return false;
             a.params.preset = v == "music" ? Preset::Music : Preset::Talk;
-        } else if (k == "--lufs")
-            next(a.params.target_lufs);
-        else if (k == "--tp")
-            next(a.params.target_true_peak_db);
-        else if (k == "--max-lra")
-            next(a.params.max_lra);
-        else if (k == "--max-s")
-            next(a.params.max_short_term);
-        else if (k == "--max-m")
-            next(a.params.max_momentary);
-        else if (k == "--out-rate")
-            nexti(a.params.out_sample_rate);
-        else if (k == "--channels")
-            nexti(a.params.out_channels);
-        else if (k == "--power-clean") {
+        } else if (k == "--lufs") {
+            if (!next(a.params.target_lufs)) return false;
+        } else if (k == "--tp") {
+            if (!next(a.params.target_true_peak_db)) return false;
+        } else if (k == "--max-lra") {
+            if (!next(a.params.max_lra)) return false;
+        } else if (k == "--max-s") {
+            if (!next(a.params.max_short_term)) return false;
+        } else if (k == "--max-m") {
+            if (!next(a.params.max_momentary)) return false;
+        } else if (k == "--out-rate") {
+            if (!nexti(a.params.out_sample_rate)) return false;
+        } else if (k == "--channels") {
+            if (!nexti(a.params.out_channels)) return false;
+        } else if (k == "--power-clean") {
             a.params.power_clean = true;
             a.params.dereverb = true;
-        } else if (k == "--denoise")
-            next(a.params.denoise_strength);
-        else if (k == "--dereverb")
+        } else if (k == "--denoise") {
+            if (!next(a.params.denoise_strength)) return false;
+        } else if (k == "--dereverb") {
             a.params.dereverb = true;
-        else if (k == "--no-highpass")
+        } else if (k == "--no-highpass") {
             a.params.adaptive_highpass = false;
-        else if (k == "--no-dehum")
+        } else if (k == "--no-dehum") {
             a.params.dehum = false;
-        else if (k == "--no-deess")
+        } else if (k == "--no-deess") {
             a.params.deess = false;
-        else if (k == "--no-declick")
+        } else if (k == "--no-declick") {
             a.params.declick = false;
-        else if (k == "--no-leveler")
+        } else if (k == "--no-leveler") {
             a.params.adaptive_leveler = false;
-        else if (k == "--no-compress")
+        } else if (k == "--no-compress") {
             a.params.compress = false;
-        else if (k == "--no-normalize")
+        } else if (k == "--no-normalize") {
             a.params.normalize = false;
-        else if (k == "--filler") {
-            const std::string v = argv[++i];
+        } else if (k == "--filler") {
+            std::string v;
+            if (!value(v)) return false;
             if (v == "cautious") a.params.filler = FillerMode::Cautious;
             else if (v == "balanced") a.params.filler = FillerMode::Balanced;
             else if (v == "aggressive") a.params.filler = FillerMode::Aggressive;
@@ -229,6 +285,11 @@ int main(int argc, char** argv) {
         usage();
         return 2;
     }
+    if (a.list_profiles) {
+        for (const DistributionProfile& d : distribution_profiles())
+            std::printf("%-16s %s\n    %s\n", d.id, distribution_label(d).c_str(), d.note);
+        return 0;
+    }
     if (!a.gen_corpus.empty()) return gen_corpus(a);
     if (a.in.empty()) {
         usage();
@@ -237,7 +298,7 @@ int main(int argc, char** argv) {
 
     AudioBuffer in;
     std::string err;
-    if (!wav_read(a.in, in, err)) {
+    if (!audio_read(a.in, in, err)) {
         std::fprintf(stderr, "cannot read %s: %s\n", a.in.c_str(), err.c_str());
         return 1;
     }
@@ -270,10 +331,37 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    ExportOptions eo = export_options_for_path(a.out);
+    if (!a.deliver.empty()) {
+        const DistributionProfile* d = find_distribution_profile(a.deliver);
+        if (!d) {
+            std::fprintf(stderr, "unknown profile %s (see --list-profiles)\n", a.deliver.c_str());
+            return 2;
+        }
+        apply_distribution_profile(*d, a.params, eo);
+        const std::string want = export_extension(eo.format);
+        if (a.out.size() < want.size() ||
+            a.out.compare(a.out.size() - want.size(), want.size(), want) != 0) {
+            std::fprintf(stderr, "profile %s writes %s files: name the output accordingly\n",
+                         d->id, want.c_str());
+            return 2;
+        }
+    }
     AudioBuffer out;
-    const Report rep = master(in, a.params, out);
+    AudioBuffer music;
+    if (!a.music.empty() && !audio_read(a.music, music, err)) {
+        std::fprintf(stderr, "cannot read %s: %s\n", a.music.c_str(), err.c_str());
+        return 1;
+    }
+    const Report rep = master(in, a.params, a.music.empty() ? nullptr : &music, out);
 
-    if (!wav_write(a.out, out, a.float_out, &err)) {
+    if (eo.format == ExportFormat::Wav16 && a.float_out) eo.format = ExportFormat::WavFloat32;
+    if (!encoder_available(eo.format)) {
+        std::fprintf(stderr, "cannot write %s: %s encoder is not available in this build\n",
+                     a.out.c_str(), export_format_name(eo).c_str());
+        return 1;
+    }
+    if (!encode_audio(a.out, out, eo, err)) {
         std::fprintf(stderr, "cannot write %s: %s\n", a.out.c_str(), err.c_str());
         return 1;
     }

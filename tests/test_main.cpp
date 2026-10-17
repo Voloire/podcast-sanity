@@ -2,14 +2,26 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "sanity/audio.hpp"
+#include "sanity/clean.hpp"
+#include "sanity/corpus.hpp"
+#include "sanity/distribution.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/dynamics.hpp"
+#include "sanity/encode.hpp"
+#include "sanity/json.hpp"
 #include "sanity/loudness.hpp"
+#include "sanity/master.hpp"
+#include "sanity/metrics.hpp"
+#include "sanity/music_bed.hpp"
 #include "tinytest.hpp"
 
 #if SANITY_HAVE_EBUR128
@@ -18,7 +30,246 @@ extern "C" {
 }
 #endif
 
+#if SANITY_HAVE_SNDFILE
+#include <sndfile.h>
+#endif
+
 using namespace sanity;
+
+namespace {
+// A three note loop, 2 s, so looping is exercised on a 12 s episode.
+AudioBuffer test_music(int fs) {
+    AudioBuffer m = AudioBuffer::zeros(fs, 2, static_cast<std::size_t>(fs) * 2);
+    for (std::size_t i = 0; i < m.frames(); i++) {
+        const double t = static_cast<double>(i) / fs;
+        const double v = 0.2 * (std::sin(kTwoPi * 220 * t) + 0.6 * std::sin(kTwoPi * 330 * t) +
+                                0.4 * std::sin(kTwoPi * 440 * t));
+        m.data[2 * i] = static_cast<float>(v);
+        m.data[2 * i + 1] = static_cast<float>(0.8 * v);
+    }
+    return m;
+}
+double rms_db_over(const std::vector<float>& x, std::size_t a, std::size_t b) {
+    double s = 0.0;
+    for (std::size_t i = a; i < b && i < x.size(); i++) s += static_cast<double>(x[i]) * x[i];
+    return b > a ? 10.0 * std::log10(s / static_cast<double>(b - a) + 1e-30) : -200.0;
+}
+}  // namespace
+
+TT_CASE("music bed sits at the requested level in pauses and ducks under speech") {
+    const int fs = 48000;
+    // Controlled speech from 2 to 6 seconds leaves enough silence to measure
+    // the 300 ms hold plus the 700 ms release independently of the segmenter.
+    // The end-to-end bed scenario covers real corpus features after filler cuts.
+    std::vector<float> speech(static_cast<std::size_t>(fs) * 12, 0.0f);
+    for (std::size_t i = 2 * fs; i < 6 * fs; i++)
+        speech[i] = static_cast<float>(0.2 * std::sin(kTwoPi * 180.0 * i / fs));
+    std::vector<FrameFeat> feats(1200);
+    for (std::size_t f = 200; f < 600; f++) feats[f].speech = true;
+    MusicBedOptions o;
+    o.enabled = true;
+    o.bed_level_db = -14.0;
+    o.duck_db = -10.0;
+    o.fade_in_s = 0.5;
+    o.fade_out_s = 0.5;
+    o.tail_s = 2.0;
+    MusicBedInfo info;
+    const std::vector<float> bed = render_music_bed(speech, fs, feats, test_music(fs), o, &info);
+    CHECK(info.applied);
+    CHECK(bed.size() == speech.size() + static_cast<std::size_t>(2.0 * fs));
+    CHECK(info.frames_added == static_cast<std::size_t>(2.0 * fs));
+    CHECK_GE(static_cast<int>(info.loops), 5);
+    // Measure settled levels: 1 second into speech, and 3 seconds into the
+    // following pause (well past hold and several release time constants).
+    const std::size_t hop = static_cast<std::size_t>(segmenter_hop(fs));
+    const std::size_t pause_at = 9 * fs, speech_at = 3 * fs;
+    CHECK(!feats[pause_at / hop].speech && feats[speech_at / hop].speech);
+    const double in_pause = rms_db_over(bed, pause_at + 15 * hop, pause_at + 45 * hop);
+    const double in_speech = rms_db_over(bed, speech_at + 15 * hop, speech_at + 45 * hop);
+    CHECK_NEAR(in_pause, info.bed_level_db, 2.0);
+    CHECK_LE(in_speech, in_pause - 10.0 + 2.0);
+    CHECK_NEAR(info.bed_level_db, info.speech_level_db - 14.0, 0.5);
+    // Fades: the first and the last sample region are quiet.
+    CHECK_LE(rms_db_over(bed, 0, fs / 50), in_pause - 20.0);
+    CHECK_LE(rms_db_over(bed, bed.size() - fs / 50, bed.size()), in_pause - 20.0);
+    // The mix adds the bed and extends the speech by the tail.
+    std::vector<float> mixed = speech;
+    const MusicBedInfo mi = mix_music_bed(mixed, fs, feats, test_music(fs), o);
+    CHECK(mi.applied);
+    CHECK(mixed.size() == bed.size());
+    CHECK_NEAR(mixed[pause_at + 20 * hop], speech[pause_at + 20 * hop] + bed[pause_at + 20 * hop], 1e-6);
+}
+
+TT_CASE("music bed is a no-op when disabled or when the music is empty") {
+    const int fs = 48000;
+    std::vector<float> speech(fs, 0.1f);
+    std::vector<FrameFeat> feats(100);
+    MusicBedOptions o;
+    AudioBuffer none;
+    CHECK(!mix_music_bed(speech, fs, feats, test_music(fs), o).applied);  // disabled
+    o.enabled = true;
+    CHECK(!mix_music_bed(speech, fs, feats, none, o).applied);           // nothing to mix
+    CHECK(speech.size() == static_cast<std::size_t>(fs));
+}
+
+TT_CASE("distribution profiles: unique ids, one recommended, the recommended one is the hosting envelope") {
+    const auto& all = distribution_profiles();
+    CHECK_GE(static_cast<int>(all.size()), 4);
+    int recommended = 0;
+    for (std::size_t i = 0; i < all.size(); i++) {
+        if (all[i].recommended) recommended++;
+        for (std::size_t j = i + 1; j < all.size(); j++)
+            CHECK(std::string(all[i].id) != all[j].id);
+    }
+    CHECK(recommended == 1);
+    const DistributionProfile& r = recommended_distribution_profile();
+    CHECK(std::string(r.id) == "podcast-voice");
+    CHECK(r.format == ExportFormat::Mp3);
+    CHECK(r.mp3_bitrate_kbps == recommended_mp3_bitrate(1));
+    CHECK(r.channels == 1);
+    CHECK_NEAR(r.target_lufs, -19.0, 1e-9);
+    CHECK_NEAR(r.true_peak_db, -1.0, 1e-9);
+    Params p;
+    ExportOptions o;
+    apply_distribution_profile(r, p, o);
+    CHECK(p.out_channels == 1);
+    CHECK_NEAR(p.target_lufs, -19.0, 1e-9);
+    CHECK(o.format == ExportFormat::Mp3);
+    CHECK(o.mp3_bitrate_kbps == 96);
+    CHECK(distribution_label(r).find("(recommended)") != std::string::npos);
+    CHECK(find_distribution_profile("no-such-profile") == nullptr);
+    CHECK(find_distribution_profile("broadcast-r128") != nullptr);
+    CHECK_NEAR(find_distribution_profile("broadcast-r128")->target_lufs, -23.0, 1e-9);
+}
+
+TT_CASE("audio_read opens every format the build can write") {
+    namespace fs = std::filesystem;
+    AudioBuffer a = AudioBuffer::zeros(48000, 1, 48000);
+    for (std::size_t i = 0; i < a.frames(); i++) a.data[i] = static_cast<float>(0.3 * std::sin(kTwoPi * 220 * i / 48000.0));
+    for (auto f : {ExportFormat::Wav16, ExportFormat::Flac, ExportFormat::Ogg, ExportFormat::Mp3}) {
+        if (!encoder_available(f)) continue;
+        const auto path = fs::temp_directory_path() / ("sanity-read" + export_extension(f));
+        ExportOptions o;
+        o.format = f;
+        std::string err;
+        CHECK(encode_audio(path.string(), a, o, err));
+        AudioBuffer b;
+        CHECK(audio_read(path.string(), b, err));
+        CHECK(b.sample_rate == 48000);
+        CHECK(b.channels == 1);
+        CHECK(b.frames() >= 47000);  // lossy decoders may trim priming samples
+        std::error_code ec;
+        fs::remove(path, ec);
+    }
+}
+
+TT_CASE("exports: Unicode paths, formats and stereo channel separation") {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() /
+        ("sanity-codecs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); }
+    } cleanup{dir};
+    AudioBuffer audio = AudioBuffer::zeros(48000, 2, 48000);
+    for (std::size_t i = 0; i < audio.frames(); ++i)
+        audio.data[2 * i] = static_cast<float>(0.4 * std::sin(kTwoPi * 440 * i / 48000));
+    for (auto format : {ExportFormat::Wav16, ExportFormat::Wav24, ExportFormat::Flac,
+                        ExportFormat::Ogg, ExportFormat::Mp3, ExportFormat::Opus}) {
+        if (!encoder_available(format)) continue;
+        const auto path = dir / fs::u8path("episodio-\xc3\xa8-\xe6\xb8\xac" + export_extension(format));
+        const auto utf8 = path.u8string();
+        const std::string name(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+        ExportOptions options;
+        options.format = format;
+        std::string error;
+        CHECK(encode_audio(name, audio, options, error));
+        CHECK(fs::exists(path));
+        if (!fs::exists(path)) continue;
+        CHECK(fs::file_size(path) > 1024);
+#if SANITY_HAVE_SNDFILE
+        SF_INFO info{};
+#ifdef _WIN32
+        auto* file = sf_wchar_open(path.c_str(), SFM_READ, &info);
+#else
+        auto* file = sf_open(path.c_str(), SFM_READ, &info);
+#endif
+        CHECK(file != nullptr);
+        if (!file) continue;
+        CHECK(info.channels == 2);
+        CHECK(info.samplerate == 48000);
+        if (format == ExportFormat::Wav24)
+            CHECK((info.format & SF_FORMAT_SUBMASK) == SF_FORMAT_PCM_24);
+        std::vector<float> decoded(static_cast<std::size_t>(info.frames) * info.channels);
+        const auto frames = sf_readf_float(file, decoded.data(), info.frames);
+        sf_close(file);
+        CHECK_GE(frames, 48000);
+        double left = 0, right = 0;
+        for (sf_count_t i = 0; i < frames; ++i) {
+            left += decoded[2 * i] * decoded[2 * i];
+            right += decoded[2 * i + 1] * decoded[2 * i + 1];
+        }
+        CHECK(left > 1000);
+        CHECK(right < left * 0.001);
+#else
+        if (format == ExportFormat::Wav16) {
+            AudioBuffer decoded;
+            CHECK(wav_read(name, decoded, error));
+            CHECK(decoded.frames() == audio.frames());
+        }
+#endif
+    }
+}
+
+TT_CASE("mp3 export at 96 kHz keeps the channel count and resamples each channel") {
+    if (!encoder_available(ExportFormat::Mp3)) return;
+    namespace fs = std::filesystem;
+    const auto path = fs::temp_directory_path() / "sanity-96k.mp3";
+    AudioBuffer a = AudioBuffer::zeros(96000, 2, 96000 * 2);
+    for (std::size_t i = 0; i < a.frames(); i++)
+        a.data[2 * i] = static_cast<float>(0.4 * std::sin(kTwoPi * 440 * i / 96000.0));  // right stays silent
+    ExportOptions o;
+    o.format = ExportFormat::Mp3;
+    std::string err;
+    CHECK(encode_audio(path.string(), a, o, err));
+#if SANITY_HAVE_SNDFILE
+    SF_INFO info{};
+    auto* f = sf_open(path.string().c_str(), SFM_READ, &info);
+    CHECK(f != nullptr);
+    if (f) {
+        CHECK(info.channels == 2);
+        CHECK(info.samplerate == 48000);
+        std::vector<float> d(static_cast<std::size_t>(info.frames) * 2);
+        const auto n = sf_readf_float(f, d.data(), info.frames);
+        sf_close(f);
+        double l = 0, r = 0;
+        for (sf_count_t i = 0; i < n; i++) { l += d[2 * i] * d[2 * i]; r += d[2 * i + 1] * d[2 * i + 1]; }
+        CHECK(l > 100);
+        CHECK(r < l * 0.001);
+    }
+#endif
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+TT_CASE("wav 24 bit is written as 24 bit even without libsndfile") {
+    namespace fs = std::filesystem;
+    const auto path = fs::temp_directory_path() / "sanity-24.wav";
+    AudioBuffer a = AudioBuffer::zeros(48000, 1, 1000);
+    for (std::size_t i = 0; i < a.frames(); i++) a.data[i] = static_cast<float>(std::sin(i * 0.05) * 0.7);
+    std::string err;
+    CHECK(wav_write_pcm24(path.string(), a, &err));
+    AudioBuffer b;
+    CHECK(wav_read(path.string(), b, err));
+    CHECK(b.frames() == a.frames());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < b.data.size(); i++)
+        worst = std::max(worst, std::fabs(static_cast<double>(b.data[i] - a.data[i])));
+    CHECK_LE(worst, 1.0 / 8388607.0 + 1e-7);
+    std::error_code ec;
+    fs::remove(path, ec);
+}
 
 namespace {
 
@@ -239,6 +490,13 @@ TT_CASE("chained resampling is stable") {
     CHECK_NEAR(peak_abs(b), 0.4, 0.01);
 }
 
+TT_CASE("resampler accepts an empty input") {
+    const std::vector<float> empty;
+    CHECK(resample(empty, 44100, 48000).empty());
+    CHECK(oversample_4x(empty).empty());
+    CHECK_NEAR(oversample_4x_peak(empty), 0.0, 1e-12);
+}
+
 // ----------------------------------------------------------------- true peak
 TT_CASE("true peak detects inter sample peaks above the sample peak") {
     const int fs = 48000;
@@ -402,6 +660,154 @@ TT_CASE("segmenter finds the silent gap between two tones") {
     for (const auto& s : segs)
         if (s.cls == SegClass::Silence && (s.end - s.start) * 10 >= 400) found_silence = true;
     CHECK(found_silence);
+}
+
+// ------------------------------------------------------------------ cleaning
+TT_CASE("hum detection works from a short quiet region") {
+    const int fs = 48000;
+    // 3 s of noise with 50 Hz hum at -30 dB; the segmenter features mark only
+    // the first 300 ms as non-speech, which is the only region dehum may use.
+    auto x = noise(0.02, static_cast<std::size_t>(fs) * 3, 9);
+    for (std::size_t i = 0; i < x.size(); i++)
+        x[i] += static_cast<float>(0.0316 * std::sin(kTwoPi * 50.0 * i / fs));
+    std::vector<FrameFeat> feats(x.size() / static_cast<std::size_t>(segmenter_hop(fs)));
+    for (std::size_t i = 30; i < feats.size(); i++) feats[i].speech = true;
+    const HumInfo h = dehum(x, fs, feats, -60.0, false);
+    CHECK_NEAR(h.freq, 50.0, 1e-9);
+    CHECK_GE(h.excess_db, 6.0);
+}
+
+TT_CASE("adaptive high pass applies the floor cutoff when no voice is measured") {
+    const int fs = 48000;
+    auto x = sine(30.0, 0.5, 1.0, fs);  // rumble only
+    std::vector<FrameFeat> feats(x.size() / static_cast<std::size_t>(segmenter_hop(fs)));
+    const HighpassInfo h = adaptive_highpass(x, fs, feats, 55.0, true);
+    CHECK(h.applied);
+    CHECK_NEAR(h.cutoff_used, 55.0, 1e-9);
+    CHECK_LE(peak_abs(std::vector<float>(x.begin() + fs / 2, x.end())), 0.25);
+}
+
+TT_CASE("score_intervals rejects a detection that runs far past the truth") {
+    const int fs = 48000;
+    std::vector<Interval> truth = {{48000, 72000}};         // 1.0 s .. 1.5 s
+    std::vector<Interval> good = {{47000, 73000}};          // within 50 ms
+    std::vector<Interval> greedy = {{47000, 120000}};       // eats a whole second after
+    CHECK(score_intervals(good, truth, fs, 50.0).true_positive == 1);
+    CHECK(score_intervals(greedy, truth, fs, 50.0).true_positive == 0);
+    CHECK(score_intervals(greedy, truth, fs, 50.0).false_positive == 1);
+}
+
+// ------------------------------------------------------ peak-limited normalise
+TT_CASE("normalize_loudness never leaves the true peak above the ceiling on transient heavy material") {
+    const int fs = 48000;
+    // Quiet noise with loud clicks: reaching -16 LUFS needs about +25 dB on the
+    // noise, which the clicks cannot take, so every round limits hard and the
+    // loop runs out of rounds.
+    auto x = noise(0.01, static_cast<std::size_t>(fs) * 12, 5);
+    for (std::size_t i = fs / 2; i + 3 < x.size(); i += fs / 3) {
+        x[i] = 0.9f;
+        x[i + 1] = -0.9f;
+    }
+    const LoudnessTargetInfo info = normalize_loudness(x, fs, -16.0, -1.0);
+    CHECK(info.applied);
+    CHECK_LE(true_peak_db(x, fs), -1.0 + 0.05);
+    CHECK_LE(std::fabs(info.error_lu), 1.0);
+}
+
+// -------------------------------------------------------------- corpus bounds
+TT_CASE("corpus generator stays inside its buffers for every seed and length") {
+    // Seeds 8 and 11 at 12 s and seed 4 at 20 s used to write past the end of
+    // the voiced buffer (hesitation vowel not clamped to the total length).
+    for (unsigned seed : {4u, 8u, 11u, 3u, 6u, 22u, 33u}) {
+        for (double seconds : {8.0, 12.0, 20.0, 60.0}) {
+            const CorpusItem it =
+                make_corpus_talk(48000, seconds, degradation_rough(), seed, "bounds", false);
+            const std::size_t total = static_cast<std::size_t>(seconds * 48000);
+            CHECK(it.clean.size() == total);
+            CHECK(it.degraded.size() == total);
+            for (const Span& f : it.fillers) CHECK(f.end <= total && f.start < f.end);
+            for (const Span& w : it.words) CHECK(w.end <= total && w.start <= w.end);
+        }
+    }
+}
+
+// ------------------------------------------------------- multichannel loudness
+TT_CASE("dual mono stereo measures 3.01 dB louder than the mono signal (BS.1770 channel sum)") {
+    const int fs = 48000;
+    const auto mono = sine(1000.0, 0.1, 5.0, fs);
+    const AudioBuffer stereo = mono_to_channels(fs, mono, 2);
+    const double l_mono = measure_loudness(mono, fs).integrated_lufs;
+    const double l_stereo = measure_loudness(stereo).integrated_lufs;
+    CHECK_NEAR(l_stereo - l_mono, 3.0103, 0.05);
+    CHECK_NEAR(channel_sum_db(2), 3.0103, 1e-6);
+    CHECK_NEAR(channel_sum_db(1), 0.0, 1e-9);
+}
+
+TT_CASE("a stereo file with one silent channel measures like the mono signal") {
+    const int fs = 48000;
+    const auto mono = sine(1000.0, 0.1, 5.0, fs);
+    AudioBuffer b = AudioBuffer::zeros(fs, 2, mono.size());
+    for (std::size_t i = 0; i < mono.size(); i++) b.data[2 * i] = mono[i];
+    CHECK_NEAR(measure_loudness(b).integrated_lufs, measure_loudness(mono, fs).integrated_lufs, 0.05);
+    CHECK_NEAR(measure_loudness(b).true_peak_db, true_peak_db(mono, fs), 1e-6);
+}
+
+TT_CASE("conformance reports the optional LRA and short term ceilings") {
+    const int fs = 48000;
+    // Six 3 s blocks alternating -26 dB and -6 dB: LRA well above 5 LU.
+    std::vector<float> x;
+    for (int k = 0; k < 6; k++) {
+        auto seg = sine(1000.0, (k % 2 == 0) ? 0.05 : 0.5, 3.0, fs);
+        x.insert(x.end(), seg.begin(), seg.end());
+    }
+    Params p;
+    p.filler = FillerMode::Off;
+    p.adaptive_leveler = false;
+    p.compress = false;
+    p.max_lra = 5.0;
+    AudioBuffer out;
+    const Report r = master(from_mono(fs, x), p, out);
+    CHECK(!r.conformant_lra);
+    CHECK(!r.conformant);
+    CHECK(r.conformant_loudness);
+    bool mentioned = false;
+    for (const std::string& w : r.warnings)
+        if (w.find("loudness range") != std::string::npos) mentioned = true;
+    CHECK(mentioned);
+    Params q = p;
+    q.max_lra = 0.0;
+    const Report r2 = master(from_mono(fs, x), q, out);
+    CHECK(r2.conformant_lra);
+}
+
+TT_CASE("json writer puts scalars on the key line, escapes strings and trims numbers") {
+    JsonWriter j(2);
+    j.begin_object();
+    j.member("a", 1);
+    j.member("b", std::string("x\"y\n"));
+    j.member("c", 2.50);
+    j.member("d", true);
+    j.key("e");
+    j.begin_array();
+    j.value_double_inline(1.0);
+    j.value_double_inline(2.25);
+    j.end_array();
+    j.key("f");
+    j.begin_object();
+    j.end_object();
+    j.end_object();
+    const std::string want =
+        "\n{\n  \"a\": 1,\n  \"b\": \"x\\\"y\\n\",\n  \"c\": 2.5,\n  \"d\": true,\n"
+        "  \"e\": [1.0,2.25],\n  \"f\": {}\n}";
+    CHECK(j.str() == want);
+    if (j.str() != want) std::printf("got:\n%s\n", j.str().c_str());
+    JsonWriter n(2);
+    n.begin_array();
+    // MSVC rejects 1.0 / 0.0 as a constant expression (C2124); infinity is the
+    // same input to the writer, which must emit null for non-finite numbers.
+    n.value_double_inline(std::numeric_limits<double>::infinity());
+    n.end_array();
+    CHECK(n.str() == "\n[null]");
 }
 
 int main() { return tinytest::run_all(); }

@@ -17,7 +17,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <thread>
 
 #include "pages/pages.h"
 #include "sanity/corpus.hpp"
@@ -277,7 +276,7 @@ void DiagnosticsPage::run_harness() {
 
     // The harness is heavy: keep the interface responsive on a worker thread and
     // post each finished scenario back to the GUI thread.
-    std::thread([this, seconds] {
+    auto* worker = QThread::create([this, seconds] {
         int done = 0;
         for (const QString& profile : {QStringLiteral("studio"), QStringLiteral("home"),
                                        QStringLiteral("rough")}) {
@@ -311,7 +310,17 @@ void DiagnosticsPage::run_harness() {
                                                 "master."));
             },
             Qt::QueuedConnection);
-    }).detach();
+    });
+    worker->setParent(this);
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    // Keep the member usable by the destructor after deleteLater runs.
+    connect(worker, &QThread::finished, this, [this] { harness_thread_ = nullptr; });
+    harness_thread_ = worker;
+    worker->start();
+}
+
+DiagnosticsPage::~DiagnosticsPage() {
+    if (harness_thread_ && harness_thread_->isRunning()) harness_thread_->wait();
 }
 
 void DiagnosticsPage::run_analysis() {

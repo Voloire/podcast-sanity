@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 
 namespace sanity {
 
@@ -29,10 +30,51 @@ void wr16(std::vector<unsigned char>& v, std::uint16_t x) {
     v.push_back((x >> 8) & 0xff);
 }
 
+// Canonical 44-byte RIFF/WAVE header around an already encoded body.
+bool write_wav(const std::string& path, const AudioBuffer& in, int bits, std::uint16_t tag,
+               const std::vector<unsigned char>& body, std::string* err) {
+    const int channels = in.channels;
+    const int bytes = bits / 8;
+    const std::uint32_t data_bytes = static_cast<std::uint32_t>(body.size());
+
+    std::vector<unsigned char> hdr;
+    hdr.reserve(44);
+    const char* riff = "RIFF";
+    hdr.insert(hdr.end(), riff, riff + 4);
+    wr32(hdr, 36 + data_bytes);
+    const char* wave = "WAVE";
+    hdr.insert(hdr.end(), wave, wave + 4);
+    const char* fmt = "fmt ";
+    hdr.insert(hdr.end(), fmt, fmt + 4);
+    wr32(hdr, 16);
+    wr16(hdr, tag);
+    wr16(hdr, static_cast<std::uint16_t>(channels));
+    wr32(hdr, static_cast<std::uint32_t>(in.sample_rate));
+    wr32(hdr, static_cast<std::uint32_t>(in.sample_rate * channels * bytes));
+    wr16(hdr, static_cast<std::uint16_t>(channels * bytes));
+    wr16(hdr, static_cast<std::uint16_t>(bits));
+    const char* dat = "data";
+    hdr.insert(hdr.end(), dat, dat + 4);
+    wr32(hdr, data_bytes);
+
+    std::ofstream f(std::filesystem::u8path(path), std::ios::binary);
+    if (!f) {
+        if (err) *err = "cannot write " + path;
+        return false;
+    }
+    f.write(reinterpret_cast<const char*>(hdr.data()), static_cast<std::streamsize>(hdr.size()));
+    f.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
+    if (!f) {
+        if (err) *err = "write failed";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool wav_read(const std::string& path, AudioBuffer& out, std::string& err) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
     if (!f) {
         err = "cannot open " + path;
         return false;
@@ -149,35 +191,11 @@ bool wav_read(const std::string& path, AudioBuffer& out, std::string& err) {
 }
 
 bool wav_write(const std::string& path, const AudioBuffer& in, bool float32, std::string* err) {
-    const int channels = in.channels;
-    const std::size_t frames = in.frames();
     const int bits = float32 ? 32 : 16;
-    const int bytes = bits / 8;
-    const std::uint32_t data_bytes = static_cast<std::uint32_t>(frames * channels * bytes);
     const std::uint16_t tag = static_cast<std::uint16_t>(float32 ? 3 : 1);
 
-    std::vector<unsigned char> hdr;
-    hdr.reserve(44);
-    const char* riff = "RIFF";
-    hdr.insert(hdr.end(), riff, riff + 4);
-    wr32(hdr, 36 + data_bytes);
-    const char* wave = "WAVE";
-    hdr.insert(hdr.end(), wave, wave + 4);
-    const char* fmt = "fmt ";
-    hdr.insert(hdr.end(), fmt, fmt + 4);
-    wr32(hdr, 16);
-    wr16(hdr, tag);
-    wr16(hdr, static_cast<std::uint16_t>(channels));
-    wr32(hdr, static_cast<std::uint32_t>(in.sample_rate));
-    wr32(hdr, static_cast<std::uint32_t>(in.sample_rate * channels * bytes));
-    wr16(hdr, static_cast<std::uint16_t>(channels * bytes));
-    wr16(hdr, static_cast<std::uint16_t>(bits));
-    const char* dat = "data";
-    hdr.insert(hdr.end(), dat, dat + 4);
-    wr32(hdr, data_bytes);
-
     std::vector<unsigned char> body;
-    body.reserve(data_bytes);
+    body.reserve(in.data.size() * (float32 ? 4u : 2u));
     for (float f : in.data) {
         if (float32) {
             std::uint32_t u;
@@ -193,19 +211,24 @@ bool wav_write(const std::string& path, const AudioBuffer& in, bool float32, std
             wr16(body, static_cast<std::uint16_t>(static_cast<std::int16_t>(x)));
         }
     }
+    return write_wav(path, in, bits, tag, body, err);
+}
 
-    std::ofstream f(path, std::ios::binary);
-    if (!f) {
-        if (err) *err = "cannot write " + path;
-        return false;
+bool wav_write_pcm24(const std::string& path, const AudioBuffer& in, std::string* err) {
+    std::vector<unsigned char> body;
+    body.reserve(in.data.size() * 3);
+    for (float f : in.data) {
+        double v = f;
+        v = v < -1.0 ? -1.0 : (v > 1.0 ? 1.0 : v);
+        std::int32_t x = static_cast<std::int32_t>(std::lround(v * 8388607.0));
+        if (x < -8388608) x = -8388608;
+        if (x > 8388607) x = 8388607;
+        const std::uint32_t u = static_cast<std::uint32_t>(x) & 0xFFFFFFu;
+        body.push_back(static_cast<unsigned char>(u & 0xff));
+        body.push_back(static_cast<unsigned char>((u >> 8) & 0xff));
+        body.push_back(static_cast<unsigned char>((u >> 16) & 0xff));
     }
-    f.write(reinterpret_cast<const char*>(hdr.data()), static_cast<std::streamsize>(hdr.size()));
-    f.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
-    if (!f) {
-        if (err) *err = "write failed";
-        return false;
-    }
-    return true;
+    return write_wav(path, in, 24, 1, body, err);
 }
 
 std::vector<float> to_mono(const AudioBuffer& b) {

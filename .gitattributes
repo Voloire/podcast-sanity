@@ -1,0 +1,8 @@
+# Normalise to LF in the repository; Windows editors see LF too.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.ico binary
+*.bmp binary
+*.png binary
+*.ttf binary

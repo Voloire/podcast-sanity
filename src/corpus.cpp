@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <random>
 #include <vector>
 
@@ -12,6 +13,78 @@
 namespace sanity {
 
 namespace {
+
+// ---------------------------------------------------------------- randomness
+// Keep the reference random stream stable on MSVC too. Standard distributions
+// use implementation-dependent algorithms. Explicit sampling avoids changing
+// the test material with the standard library (libm rounding can still differ).
+class Random {
+public:
+    explicit Random(unsigned seed) : rng_(seed) {}
+
+    // uniform_real_distribution<double>(0, 1): generate_canonical over 53 bits,
+    // which costs two mt19937 draws and one division by 2^64.
+    double uniform() {
+        // Sequenced on purpose: the first draw is the low half of the result,
+        // and the order of the two calls must not depend on the compiler.
+        const double low = static_cast<double>(rng_());
+        const double high = static_cast<double>(rng_());
+        double r = (low + high * 4294967296.0) / 18446744073709551616.0;  // 2^32, 2^64
+        if (r >= 1.0) r = std::nextafter(1.0, 0.0);
+        return r;
+    }
+
+    // normal_distribution<double>(0, 1): Marsaglia polar method with the spare
+    // value kept, in the same order libstdc++ returns and stores them.
+    double normal() {
+        if (have_saved_) {
+            have_saved_ = false;
+            return saved_;
+        }
+        double x = 0.0, y = 0.0, r2 = 0.0;
+        do {
+            x = 2.0 * uniform() - 1.0;
+            y = 2.0 * uniform() - 1.0;
+            r2 = x * x + y * y;
+        } while (r2 > 1.0 || r2 == 0.0);
+        const double mult = std::sqrt(-2.0 * std::log(r2) / r2);
+        saved_ = x * mult;
+        have_saved_ = true;
+        return y * mult;
+    }
+
+    // uniform_int_distribution<std::size_t>(a, b). mt19937 covers exactly 2^32
+    // values, which is the case libstdc++ answers with Lemire's nearly
+    // divisionless multiplication instead of rejection on a division.
+    std::size_t between(std::size_t a, std::size_t b) {
+        if (b - a >= UINT32_MAX) {
+            const std::uint64_t span = static_cast<std::uint64_t>(b - a) + 1;
+            std::uint64_t value;
+            const std::uint64_t threshold = span ? (0ULL - span) % span : 0;
+            do {
+                const std::uint64_t high = rng_();
+                value = (high << 32) | rng_();
+            } while (value < threshold);
+            return a + static_cast<std::size_t>(span ? value % span : value);
+        }
+        const std::uint32_t range = static_cast<std::uint32_t>(b - a + 1);
+        std::uint64_t product = static_cast<std::uint64_t>(rng_()) * range;
+        std::uint32_t low = static_cast<std::uint32_t>(product);
+        if (low < range) {
+            const std::uint32_t threshold = static_cast<std::uint32_t>(0u - range) % range;
+            while (low < threshold) {
+                product = static_cast<std::uint64_t>(rng_()) * range;
+                low = static_cast<std::uint32_t>(product);
+            }
+        }
+        return static_cast<std::size_t>(product >> 32) + a;
+    }
+
+private:
+    std::mt19937 rng_;
+    bool have_saved_ = false;
+    double saved_ = 0.0;
+};
 
 // ---------------------------------------------------------------- synthesis
 // A two pole resonator used as a formant.
@@ -27,7 +100,7 @@ struct Resonator {
         const double w0 = kTwoPi * f / fs;
         const double a1 = -2.0 * r * std::cos(w0);
         const double a2 = r * r;
-        const double gain = (1.0 - r) * std::sqrt(1.0 - a1 * r * r / (4.0) * 0.0 + 0.0);
+        const double gain = 1.0 - r;
         const double y = gain * x - a1 * y1 - a2 * y2;
         y2 = y1;
         y1 = y;
@@ -153,8 +226,7 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
     // to the pitch detector.
     std::vector<float> voiced(total, 0.0f);
     std::vector<float> unvoiced(total, 0.0f);
-    std::mt19937 rng(seed);
-    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    Random rnd(seed);
 
     const double f0_base = female ? 205.0 : 122.0;
     Glottal glottal;
@@ -171,10 +243,13 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
         if (make_filler) {
             // A hesitation is isolated between two pauses, the way a speaker
             // actually stops and searches for a word.
-            pos += static_cast<std::size_t>((0.25 + 0.15 * uni(rng)) * sample_rate);
+            pos += static_cast<std::size_t>((0.25 + 0.15 * rnd.uniform()) * sample_rate);
             // One sustained vowel, flat pitch, no consonants.
-            const double dur = 0.30 + 0.20 * uni(rng);
-            const std::size_t n = static_cast<std::size_t>(dur * sample_rate);
+            const double dur = 0.30 + 0.20 * rnd.uniform();
+            if (pos >= total) break;
+            // Never write past the end of the take: the loop guard only
+            // guarantees half a second of room.
+            const std::size_t n = std::min(static_cast<std::size_t>(dur * sample_rate), total - pos);
             const std::size_t start = pos;
             const Vowel v = schwa();
             r1.set(v.f1, 80);
@@ -191,32 +266,32 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
                 const double y = r1.process(src) + 0.7 * r2.process(src) + 0.35 * r3.process(src);
                 voiced[start + i] += static_cast<float>(y * env);
             }
-            item.fillers.push_back({start, std::min(total, start + n)});
+            item.fillers.push_back({start, start + n});
             pos += n;
             // A pause after the hesitation.
-            pos += static_cast<std::size_t>((0.25 + 0.15 * uni(rng)) * sample_rate);
+            pos += static_cast<std::size_t>((0.25 + 0.15 * rnd.uniform()) * sample_rate);
             syllable++;
             continue;
         }
 
         // A word: two or three syllables with a consonant onset.
-        const int syllables = 2 + static_cast<int>(uni(rng) * 2.0);
+        const int syllables = 2 + static_cast<int>(rnd.uniform() * 2.0);
         const std::size_t word_start = pos;
-        double pitch = f0_base * (0.94 + 0.14 * uni(rng));
+        double pitch = f0_base * (0.94 + 0.14 * rnd.uniform());
         for (int s = 0; s < syllables; s++) {
             // Consonant: a short burst of shaped noise.
-            const double cons_dur = 0.045 + 0.03 * uni(rng);
+            const double cons_dur = 0.045 + 0.03 * rnd.uniform();
             const std::size_t nc = static_cast<std::size_t>(cons_dur * sample_rate);
             for (std::size_t i = 0; i < nc && pos + i < total; i++) {
                 const double t = static_cast<double>(i) / nc;
                 const double env = std::sin(kPi * t);
-                unvoiced[pos + i] += static_cast<float>((uni(rng) * 2.0 - 1.0) * env);
+                unvoiced[pos + i] += static_cast<float>((rnd.uniform() * 2.0 - 1.0) * env);
             }
             pos += nc;
 
             // Vowel.
             const Vowel v = vowel_of(syllable + s);
-            const double vow_dur = 0.10 + 0.10 * uni(rng);
+            const double vow_dur = 0.10 + 0.10 * rnd.uniform();
             const std::size_t nv = static_cast<std::size_t>(vow_dur * sample_rate);
             r1.set(v.f1, 70);
             r2.set(v.f2, 90);
@@ -233,7 +308,7 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
         }
         item.words.push_back({word_start, std::min(total, pos)});
         // Inter word pause, occasionally longer for a phrase break.
-        const double pause = (syllable % 7 == 6) ? 0.35 + 0.2 * uni(rng) : 0.05 + 0.06 * uni(rng);
+        const double pause = (syllable % 7 == 6) ? 0.35 + 0.2 * rnd.uniform() : 0.05 + 0.06 * rnd.uniform();
         pos += static_cast<std::size_t>(pause * sample_rate);
         syllable++;
         t_global += 0.4;
@@ -276,11 +351,10 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
         // Synthetic exponentially decaying noise impulse response.
         const std::size_t ir_len = static_cast<std::size_t>(d.rt60 * 1.4 * sample_rate);
         std::vector<float> ir(ir_len);
-        std::mt19937 ir_rng(seed + 99);
-        std::normal_distribution<double> nd(0.0, 1.0);
+        Random ir_rng(seed + 99);
         for (std::size_t i = 0; i < ir_len; i++) {
             const double t = static_cast<double>(i) / sample_rate;
-            ir[i] = static_cast<float>(nd(ir_rng) * std::exp(-6.907755 * t / d.rt60));
+            ir[i] = static_cast<float>(ir_rng.normal() * std::exp(-6.907755 * t / d.rt60));
         }
         double e = 0.0;
         for (float v : ir) e += static_cast<double>(v) * v;
@@ -306,14 +380,13 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
 
     if (d.noise_snr_db > 0.0) {
         const double noise_rms = speech_rms / db_to_gain(d.noise_snr_db);
-        std::mt19937 nr(seed + 7);
-        std::normal_distribution<double> nd(0.0, 1.0);
+        Random nr(seed + 7);
         // One pole low pass for a slightly pink spectrum.
         double lp = 0.0;
         const double a = std::min(0.99, std::max(0.0, d.noise_tilt));
         std::vector<float> n(x.size());
         for (std::size_t i = 0; i < n.size(); i++) {
-            const double w = nd(nr);
+            const double w = nr.normal();
             lp = a * lp + (1.0 - a) * w;
             n[i] = static_cast<float>(w * (1.0 - a) + lp * a * 3.0);
         }
@@ -343,20 +416,18 @@ CorpusItem make_corpus_talk(int sample_rate, double seconds, const Degradations&
     if (d.dc != 0.0)
         for (float& v : x) v = static_cast<float>(v + d.dc);
 
-    if (d.clicks > 0) {
-        std::mt19937 cr(seed + 5);
-        std::uniform_int_distribution<std::size_t> pos_d(1, x.size() - 2);
+    if (d.clicks > 0 && x.size() >= 3) {
+        Random cr(seed + 5);
         for (int i = 0; i < d.clicks; i++) {
-            const std::size_t p = pos_d(cr);
+            const std::size_t p = cr.between(1, x.size() - 2);
             x[p] = (i % 2 == 0) ? 0.95f : -0.95f;
         }
     }
-    if (d.dropout_per_min > 0.0) {
+    if (d.dropout_per_min > 0.0 && x.size() >= 2) {
         const int count = static_cast<int>(d.dropout_per_min * seconds / 60.0) + 1;
-        std::mt19937 dr(seed + 6);
-        std::uniform_int_distribution<std::size_t> pos_d(1, x.size() - 1);
+        Random dr(seed + 6);
         for (int i = 0; i < count; i++) {
-            const std::size_t p = pos_d(dr);
+            const std::size_t p = dr.between(1, x.size() - 1);
             const std::size_t len = static_cast<std::size_t>(0.02 * sample_rate);
             for (std::size_t k = 0; k < len && p + k < x.size(); k++) x[p + k] = 0.0f;
         }

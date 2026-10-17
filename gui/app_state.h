@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QThread>
 #include <QVector>
+#include <memory>
 
 #include "sanity/audio.hpp"
 #include "sanity/encode.hpp"
@@ -20,6 +21,7 @@
 Q_DECLARE_METATYPE(sanity::AudioBuffer)
 Q_DECLARE_METATYPE(sanity::Report)
 Q_DECLARE_METATYPE(sanity::Params)
+Q_DECLARE_METATYPE(std::shared_ptr<const sanity::AudioBuffer>)
 
 namespace gui {
 
@@ -37,13 +39,17 @@ struct Session {
     sanity::Params params;
     sanity::AudioBuffer mastered;
     sanity::Report report;
+    QString music_path;
+    std::shared_ptr<const sanity::AudioBuffer> music;
+    bool has_music = false;
 
     bool has_audio = false;
     bool has_mastered = false;
     bool has_report = false;
     bool saved = false;
 
-    double duration() const { return has_audio ? audio.duration() : 0.0; }
+    double seconds_hint = 0.0;  // duration from session.json while the audio is not loaded
+    double duration() const { return has_audio ? audio.duration() : seconds_hint; }
 };
 
 class AppState : public QObject {
@@ -58,8 +64,12 @@ public:
     // ---- working audio -------------------------------------------------
     void set_audio(const sanity::AudioBuffer& b, const QString& path, const QString& kind);
     void clear_audio();
+    bool open_audio_file(const QString& path, QString* error);
     void set_mastered(const sanity::AudioBuffer& b, const sanity::Report& r);
     void set_params(const sanity::Params& p);
+    bool set_music(const QString& path, QString* error);
+    void set_music_buffer(std::shared_ptr<const sanity::AudioBuffer> music, const QString& label);
+    void clear_music();
 
     // ---- library -------------------------------------------------------
     QString library_dir() const;
@@ -86,6 +96,7 @@ signals:
     void audio_changed();
     void mastered_changed();
     void params_changed();
+    void music_changed();
     void library_changed();
     void status_message(const QString& text);
     void mastering_started();
@@ -98,6 +109,8 @@ private:
     QString library_dir_;
     bool busy_ = false;
     double last_elapsed_ms_ = 0.0;
+    int job_id_ = 0;
+    int cancelled_job_ = -1;
 
     class Worker;
     Worker* worker_ = nullptr;

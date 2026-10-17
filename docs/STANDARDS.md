@@ -20,9 +20,10 @@ defaults are, and where the numbers come from.
   and applies the −0.691 dB offset exactly once, to the summed channel energies.
 * Momentary loudness is the 400 ms window value; short term is 3 s.
 * Loudness range (LRA) follows EBU Tech 3342.
-* Multi-channel material is folded to mono, so the reported integrated loudness
-  is that of the mono sum — the same signal the chain processes. See the
-  limitation in `DESIGN-podcast-sanity.md` §7.
+* Multi-channel measurement sums independently K-weighted channel energies;
+  opposite-phase channels do not cancel in the meter. True peak is the maximum
+  per-channel peak. The DSP chain still folds to mono; dual-mono delivery is
+  normalised for its actual channel count. See `DESIGN-podcast-sanity.md` §7.
 
 **True peak** is measured with 4× oversampling and a polyphase FIR, evaluated
 only near candidate peaks (a pruned scan). The unit tests pin the detector with
@@ -57,49 +58,65 @@ setting the target explicitly. The GUI exposes these presets:
 | AES streaming | −16 LUFS | −1.0 dBTP | |
 | Custom | any | any | |
 
-Optional ceilings: `max_lra`, `max_short_term` and `max_momentary`. All three are
-**0 = unconstrained** by default; when set, exceeding them is reported as a
-conformance failure. A non-zero `max_short_term` or `max_momentary` turns on
-clause-by-clause enforcement in the pipeline.
+Optional ceilings: `max_short_term` and `max_momentary` are **enforced** by a slow
+gain reduction inside the normalisation stage and then **reported**; `max_lra` is
+**reported only** (a loudness range reduction would be a second leveler pass and
+is not part of the chain). All three are 0 = unconstrained; when set, exceeding
+them makes `conformance.ok` false with the reason in `warnings`.
 
 ---
 
 ## 3. Encoding and the hosting envelope
 
-Spotify, Apple Podcasts and the other directories do not accept uploads: they
-read a **RSS feed** hosted elsewhere (Buzzsprout, Transistor, Spotify for
-Creators, your own server). The hosting provider is the thing that may re-encode,
-so the file should arrive already inside the envelope the host promises not to
-touch:
+The application publishes no files itself. Export to your hosting provider
+(Buzzsprout, Transistor, Spotify for Creators or your own server) and use its
+publishing workflow and RSS feed. A host may re-encode; the project's recommended
+MP3 envelope is:
 
 * **Mono ≤ 96 kbps MP3**, **stereo ≤ 192 kbps MP3**.
 
 `recommended_mp3_bitrate(channels)` encodes exactly this, and the export page
-uses it as the default and warns when a higher bitrate is chosen. Because the
-master is already loudness- and peak-conformant *before* encoding, a re-encode
-by the host cannot move it out of spec by any meaningful amount.
+uses it as the default and warns when a higher bitrate is chosen.
+
+The engine's delivery profiles, listed by `podcast-sanity-render --list-profiles`,
+are shared by the CLI and the export page:
+
+| Profile id | Format | Channels | Loudness | True peak | When to use |
+|------------|--------|----------|----------|-----------|-------------|
+| **podcast-voice (recommended)** | MP3 96 kbps | Mono | -19 LUFS | -1 dBTP | Spoken-word podcast hosting |
+| podcast-stereo | MP3 192 kbps | Stereo | -16 LUFS | -1 dBTP | Podcasts with music |
+| archive-wav24 | WAV 24 bit | Keep input | Auto: -19 mono / -16 stereo | -1 dBTP | Lossless archive for later exports |
+| lossless-flac | FLAC 24 bit | Keep input | Auto: -19 mono / -16 stereo | -1 dBTP | Hosts that accept FLAC |
+| broadcast-r128 | WAV 24 bit, 48 kHz | Keep input | -23 LUFS | -1 dBTP | EBU R128 radio hand-over |
+
+All profiles except `broadcast-r128` keep the input sample rate in the engine.
+
+MP3 decoding overshoots the encoded peaks by up to about 1 dB. The true peak
+ceiling is enforced on the master before encoding; the decoded MP3 is checked
+by the harness to stay below 0 dBTP. Hosts that re-encode do their own limiting;
+the mono 96 kbps envelope is a recommendation, not a guarantee against re-encoding.
 
 Other formats are offered for archival or for hosts that accept them: WAV 16/24
-and 32-bit float, FLAC 24, and Ogg Vorbis. The build hides any format for which
+and 32-bit float, FLAC 24, Ogg Vorbis and Opus. Opus availability is probed through
+libsndfile and does not silently fall back to Vorbis. The build hides any format for which
 no encoder is present rather than offering a button that cannot work.
 
 ---
 
 ## 4. What "conformant" means in the report
 
-`Report::conformance` carries three booleans, and the CLI exits 3 when the
+`Report::conformance` carries six booleans, and the CLI exits 3 when the
 overall verdict is false:
 
 ```json
-"conformance": { "loudness_ok": true, "true_peak_ok": true, "ok": true }
+"conformance": { "loudness_ok": true, "true_peak_ok": true, "lra_ok": true, "short_term_ok": true, "momentary_ok": true, "ok": true }
 ```
 
 * `loudness_ok` — the achieved integrated loudness is within tolerance of the
   target (the engine lands within 0.05 LU on the corpus).
-* `true_peak_ok` — the measured true peak of the **written output** is at or
-  below the ceiling. Normalisation iterates limit → measure → correct so the
-  peak sits *on* the ceiling rather than below it, which is what makes the
-  loudness target reachable without clipping.
+* `true_peak_ok` — the measured true peak of the final unencoded output buffer
+  is within the ceiling tolerance. Output resampling precedes final limiting;
+  the peak may sit below the ceiling when no further limiting is needed.
 * `ok` — both, plus any configured maximum LRA / short-term / momentary.
 
 Nothing else in the report decides conformance: the filler counts and the

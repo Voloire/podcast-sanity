@@ -11,7 +11,7 @@
 
 namespace sanity {
 
-enum class ExportFormat { Wav16, Wav24, WavFloat32, Flac, Ogg, Mp3 };
+enum class ExportFormat { Wav16, Wav24, WavFloat32, Flac, Ogg, Mp3, Opus };
 
 struct ExportOptions {
     ExportFormat format = ExportFormat::Wav16;

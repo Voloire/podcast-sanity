@@ -21,9 +21,11 @@ class QSpinBox;
 class QDoubleSpinBox;
 class QSlider;
 class QTableWidget;
+class QThread;
 class QTimer;
 class QVBoxLayout;
 class QScrollArea;
+class QMediaPlayer;
 
 namespace gui {
 
@@ -32,6 +34,7 @@ class Chip;
 class LevelMeter;
 class StatTile;
 class WaveformView;
+class VuMeter;
 
 // A scrolled page with a title block, a subtitle and a single column of cards.
 class Page : public QWidget {
@@ -57,6 +60,8 @@ public:
 
 signals:
     void recording_ready();
+    void recording_started();
+    void recording_stopped();
 
 private:
     void refresh_devices();
@@ -65,7 +70,7 @@ private:
     void stop_recording();
     void add_marker();
     void run_mic_test();
-    void on_level(float peak_db, float rms_db, float lufs);
+    void on_level(float peak_db, float rms_db, float lufs, float true_peak_db);
     void on_chunk(const QByteArray& pcm);
     void tick();
     void paint_idle_waveform();
@@ -79,19 +84,16 @@ private:
 
     QComboBox* source_ = nullptr;
     QComboBox* input_dev_ = nullptr;
-    QComboBox* monitor_dev_ = nullptr;
     QComboBox* rate_ = nullptr;
     QComboBox* channels_ = nullptr;
     QSlider* gain_ = nullptr;
     QLabel* gain_label_ = nullptr;
-    QCheckBox* anti_hum_ = nullptr;
-    QCheckBox* auto_split_ = nullptr;
-    QCheckBox* monitor_ = nullptr;
 
-    QPushButton* rec_ = nullptr;
-    QPushButton* pause_ = nullptr;
-    QPushButton* stop_ = nullptr;
-    QPushButton* marker_ = nullptr;
+    TransportButton* rec_ = nullptr;
+    TransportButton* pause_ = nullptr;
+    TransportButton* stop_ = nullptr;
+    TransportButton* marker_ = nullptr;
+    VuMeter* vu_ = nullptr;
 
     LevelMeter* in_meter_ = nullptr;
     LevelMeter* tp_meter_ = nullptr;
@@ -108,8 +110,12 @@ private:
     bool paused_ = false;
     double elapsed_ = 0.0;
     double last_mic_test_db_ = -200.0;
+    double mic_test_floor_db_ = 0.0;
+    bool mic_testing_ = false;
     std::vector<float> live_display_;   // rolling window shown in the waveform
     int sample_rate_of_live_ = 48000;
+    int live_rate_ = 48000;      // rate the device actually delivered
+    int live_channels_ = 1;      // channels the device actually delivered
     double last_paint_ = -1.0;
 
     class Capture* capture_ = nullptr;
@@ -120,6 +126,7 @@ class MasterPage : public QWidget {
     Q_OBJECT
 public:
     explicit MasterPage(QWidget* parent = nullptr);
+    ~MasterPage() override;
     void load_params(const sanity::Params& p);
 
 private:
@@ -130,11 +137,38 @@ private:
     void build_stage_table();
     void build_waveform();
     void play(const QString& which);
+    void play_file(const QString& path);
+    void stop_playback();
+    void preview_music();
+    void refresh_music();
     void refresh_from_state();
 
     Card* audio_card_ = nullptr;
     Card* chain_card_ = nullptr;
     Card* filler_card_ = nullptr;
+    Card* music_card_ = nullptr;
+    QPushButton* music_pick_ = nullptr;
+    QLabel* music_info_ = nullptr;
+    QCheckBox* music_enabled_ = nullptr;
+    QSlider* music_level_ = nullptr;
+    QLabel* music_level_label_ = nullptr;
+    QSlider* music_duck_ = nullptr;
+    QLabel* music_duck_label_ = nullptr;
+    QDoubleSpinBox* music_fade_in_ = nullptr;
+    QDoubleSpinBox* music_fade_out_ = nullptr;
+    QDoubleSpinBox* music_offset_ = nullptr;
+    QDoubleSpinBox* music_tail_ = nullptr;
+    QCheckBox* music_loop_ = nullptr;
+    QPushButton* music_preview_ = nullptr;
+    QPushButton* music_preview_stop_ = nullptr;
+    QThread* music_thread_ = nullptr;
+    QThread* candidates_thread_ = nullptr;
+    int candidates_generation_ = 0;
+    VuMeter* lufs_before_ = nullptr;
+    VuMeter* lufs_after_ = nullptr;
+    QMediaPlayer* player_ = nullptr;
+    bool loading_params_ = true;
+    int preview_generation_ = 0;
     Card* result_card_ = nullptr;
     Card* stages_card_ = nullptr;
 
@@ -155,6 +189,7 @@ private:
     QCheckBox* normalize_ = nullptr;
 
     QPushButton* process_ = nullptr;
+    QPushButton* cancel_ = nullptr;
     QPushButton* candidates_btn_ = nullptr;
     QPushButton* play_before_ = nullptr;
     QPushButton* play_after_ = nullptr;
@@ -239,15 +274,22 @@ public:
     explicit ExportPage(QWidget* parent = nullptr);
 
 private:
+    void apply_profile();
+    void custom_profile();
     void refresh();
     void do_export();
     void copy_rss();
     void open_spotify();
     sanity::ExportOptions options() const;
+    // True when a master exists but was rendered with other delivery settings.
+    bool master_is_stale() const;
 
     Card* format_card_ = nullptr;
     Card* conform_card_ = nullptr;
     Card* publish_card_ = nullptr;
+    QComboBox* profile_ = nullptr;
+    QLabel* profile_note_ = nullptr;
+    bool applying_profile_ = false;
     QComboBox* format_ = nullptr;
     QComboBox* channels_ = nullptr;
     QComboBox* rate_ = nullptr;
@@ -305,6 +347,7 @@ class DiagnosticsPage : public QWidget {
     Q_OBJECT
 public:
     explicit DiagnosticsPage(QWidget* parent = nullptr);
+    ~DiagnosticsPage() override;
 
 private:
     void run_harness();
@@ -331,6 +374,7 @@ private:
     QPushButton* save_ = nullptr;
     QLabel* status_ = nullptr;
     QComboBox* seconds_ = nullptr;
+    QThread* harness_thread_ = nullptr;
     bool running_ = false;
     QString last_json_;
 };

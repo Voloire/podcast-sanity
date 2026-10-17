@@ -18,6 +18,7 @@
 #include "pages/pages.h"
 #include "theme.h"
 #include "widgets.h"
+#include "studio_widgets.h"
 
 using namespace sanity;
 
@@ -25,19 +26,19 @@ namespace gui {
 
 namespace {
 struct NavEntry {
-    const char* glyph;
+    NavIcon icon;
     const char* label;
 };
 // Order matches the mockup: capture, mastering, standards, library, export,
 // settings, diagnostics.
 const NavEntry kNav[] = {
-    {"[ * ]", "Registrazione"},
-    {"[ ~ ]", "Sanity Master"},
-    {"[ = ]", "Standard & Loudness"},
-    {"[ # ]", "Libreria / Sessioni"},
-    {"[ > ]", "Esporta & Pubblica"},
-    {"[ + ]", "Impostazioni"},
-    {"[ ? ]", "Diagnostica & Test"},
+    {NavIcon::Mic, "Registrazione"},
+    {NavIcon::Sliders, "Sanity Master"},
+    {NavIcon::Gauge, "Standard & Loudness"},
+    {NavIcon::Library, "Libreria / Sessioni"},
+    {NavIcon::Upload, "Esporta & Pubblica"},
+    {NavIcon::Gear, "Impostazioni"},
+    {NavIcon::Stethoscope, "Diagnostica & Test"},
 };
 }  // namespace
 
@@ -89,23 +90,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                                        : QStringLiteral("Nessun audio caricato"));
     });
     connect(&AppState::get(), &AppState::mastering_started, this, [this] {
-        state_chip_->set_state(State::Busy, QStringLiteral("Elaborazione"));
+        set_global_state(State::Busy, QStringLiteral("Elaborazione"));
     });
     connect(&AppState::get(), &AppState::mastering_finished, this,
             [this](bool ok, const QString& err) {
                 if (!ok) {
-                    state_chip_->set_state(State::Error, QStringLiteral("Errore"));
+                    set_global_state(err == QStringLiteral("Annullato") ? State::Idle : State::Error,
+                                     err == QStringLiteral("Annullato") ? err : QStringLiteral("Errore"));
                     status_->setText(err);
                     return;
                 }
                 const Report& r = AppState::get().session().report;
-                state_chip_->set_state(r.conformant ? State::Ready : State::Warning,
+                set_global_state(r.conformant ? State::Ready : State::Warning,
                                        r.conformant ? QStringLiteral("Conforme")
                                                     : QStringLiteral("Da rivedere"));
                 select_page(1);
             });
     connect(&AppState::get(), &AppState::library_changed, this,
             [this] { status_->setText(QStringLiteral("Libreria aggiornata")); });
+    connect(&AppState::get(), &AppState::theme_changed, this, &MainWindow::apply_theme);
 
     select_page(0);
     apply_theme();
@@ -126,12 +129,14 @@ void MainWindow::build_sidebar() {
     auto* tag = new QLabel(QStringLiteral("registra - pulisci - pubblica"), side);
     tag->setObjectName("BrandSub");
     v->addWidget(tag);
+    on_air_ = new OnAirSign(side);
+    v->addWidget(on_air_, 0, Qt::AlignLeft);
     v->addSpacing(14);
 
     nav_layout_ = v;
     nav_buttons_.clear();
     for (int i = 0; i < static_cast<int>(std::size(kNav)); i++) {
-        auto* b = new NavButton(QString::fromUtf8(kNav[i].glyph),
+        auto* b = new NavButton(kNav[i].icon,
                                 QString::fromUtf8(kNav[i].label), side);
         connect(b, &QPushButton::clicked, this, [this, i] { select_page(i); });
         v->addWidget(b);
@@ -152,7 +157,16 @@ void MainWindow::build_sidebar() {
 
 void MainWindow::build_pages() {
     stack_ = new QStackedWidget(this);
-    stack_->addWidget(new RecordPage(this));
+    auto* recorder = new RecordPage(this);
+    stack_->addWidget(recorder);
+    connect(recorder, &RecordPage::recording_started, this, [this] {
+        on_air_->set_on(true);
+        setWindowTitle(QStringLiteral("podcast-sanity  ON AIR"));
+    });
+    connect(recorder, &RecordPage::recording_stopped, this, [this] {
+        on_air_->set_on(false);
+        setWindowTitle(QStringLiteral("podcast-sanity"));
+    });
     stack_->addWidget(new MasterPage(this));
     stack_->addWidget(new StandardsPage(this));
     stack_->addWidget(new LibraryPage(this));
@@ -166,13 +180,15 @@ void MainWindow::build_statusbar() {
     subtitle_ = new QLabel(QStringLiteral("Nessun audio caricato"));
     subtitle_->setObjectName("Hint");
     state_chip_ = new Chip();
-    state_chip_->set_state(State::Idle, QStringLiteral("In attesa"));
+    state_led_ = new LedIndicator();
+    set_global_state(State::Idle, QStringLiteral("In attesa"));
     auto* host = new QWidget();
     auto* hl = new QHBoxLayout(host);
     hl->setContentsMargins(8, 0, 8, 0);
     hl->setSpacing(12);
     hl->addWidget(subtitle_);
     hl->addWidget(status_, 1);
+    hl->addWidget(state_led_);
     hl->addWidget(state_chip_);
     statusBar()->addWidget(host, 1);
 
@@ -186,24 +202,26 @@ void MainWindow::select_page(int index) {
     for (int i = 0; i < nav_buttons_.size(); i++) nav_buttons_[i]->setChecked(i == index);
 }
 
+void MainWindow::set_global_state(State state, const QString& text) {
+    state_chip_->set_state(state, text);
+    state_led_->set_state(state);
+}
+
 void MainWindow::open_audio() {
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Apri un audio"),
         QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-        QStringLiteral("Audio (*.wav);;Tutti i file (*)"));
+        QString::fromStdString(sanity::audio_read_filter()));
     if (path.isEmpty()) return;
-    sanity::AudioBuffer b;
-    std::string err;
-    if (!sanity::wav_read(path.toStdString(), b, err)) {
+    QString err;
+    if (!AppState::get().open_audio_file(path, &err)) {
         QMessageBox::warning(this, QStringLiteral("Apri"),
                              QStringLiteral("Impossibile leggere il file:\n%1")
-                                 .arg(QString::fromStdString(err)));
+                                 .arg(err));
         return;
     }
-    AppState::get().set_audio(b, path, QStringLiteral("file"));
-    AppState::get().session().name = QFileInfo(path).completeBaseName();
     subtitle_->setText(QStringLiteral("%1 - %2")
-                           .arg(AppState::get().session().name, describe_audio(b)));
+                           .arg(AppState::get().session().name, describe_audio(AppState::get().session().audio)));
     select_page(1);
 }
 
@@ -236,17 +254,19 @@ void MainWindow::start_mastering() {
 }
 
 void MainWindow::toggle_theme() {
-    set_mode(mode() == ThemeMode::Light ? ThemeMode::Dark : ThemeMode::Light);
+    set_mode(mode() == ThemeMode::Light ? ThemeMode::Dark :
+             mode() == ThemeMode::Dark ? ThemeMode::Studio : ThemeMode::Light);
     QSettings st;
-    st.setValue("ui/theme", mode() == ThemeMode::Dark ? 1 : 0);
+    st.setValue("ui/theme", static_cast<int>(mode()));
     apply_theme();
 }
 
 void MainWindow::apply_theme() {
     qApp->setStyleSheet(style_sheet());
     if (theme_btn_)
-        theme_btn_->setText(mode() == ThemeMode::Light ? QStringLiteral("Passa al tema scuro")
-                                                       : QStringLiteral("Passa al tema chiaro"));
+        theme_btn_->setText(mode() == ThemeMode::Light ? QStringLiteral("Tema: chiaro") :
+                            mode() == ThemeMode::Dark ? QStringLiteral("Tema: scuro")
+                                                      : QStringLiteral("Tema: studio"));
 }
 
 void MainWindow::show_about() {

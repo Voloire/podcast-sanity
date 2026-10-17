@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CPackWiXPatch>
+  <!-- Launch without elevation after a per-user installation. -->
+  <CPackWiXFragment Id="#PRODUCT">
+    <Property Id="WixShellExecTarget" Value="[#CM_FP_bin.podcast_sanity.exe]" />
+    <CustomAction Id="LaunchApplication" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
+      </Publish>
+    </UI>
+  </CPackWiXFragment>
+</CPackWiXPatch>

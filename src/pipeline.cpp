@@ -115,6 +115,20 @@ void write_params(JsonWriter& j, const Params& p) {
         case FillerMode::Off: break;
     }
     j.member("filler", std::string(f));
+    j.key("music_bed");
+    j.begin_object();
+    j.member("enabled", p.music_bed.enabled);
+    j.member("bed_level_db", p.music_bed.bed_level_db);
+    j.member("duck_db", p.music_bed.duck_db);
+    j.member("attack_ms", p.music_bed.attack_ms);
+    j.member("release_ms", p.music_bed.release_ms);
+    j.member("hold_ms", p.music_bed.hold_ms);
+    j.member("fade_in_s", p.music_bed.fade_in_s);
+    j.member("fade_out_s", p.music_bed.fade_out_s);
+    j.member("offset_s", p.music_bed.offset_s);
+    j.member("tail_s", p.music_bed.tail_s);
+    j.member("loop", p.music_bed.loop);
+    j.end_object();
     j.member("out_sample_rate", p.out_sample_rate);
     j.member("out_channels", p.out_channels);
     j.end_object();
@@ -196,6 +210,9 @@ std::string Report::to_json() const {
     j.begin_object();
     j.member("loudness_ok", conformant_loudness);
     j.member("true_peak_ok", conformant_true_peak);
+    j.member("lra_ok", conformant_lra);
+    j.member("short_term_ok", conformant_short_term);
+    j.member("momentary_ok", conformant_momentary);
     j.member("ok", conformant);
     j.end_object();
 
@@ -244,10 +261,14 @@ std::string Report::to_summary() const {
 }
 
 Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
+    return master(in, p, nullptr, out);
+}
+
+Report master(const AudioBuffer& in, const Params& p, const AudioBuffer* music, AudioBuffer& out) {
     Report r;
     r.version = SANITY_VERSION;
     r.params = p;
-    r.params_hash = params_hash(p);
+    r.params_hash = params_hash(p, music);
     r.frames_in = in.frames();
 
     const int in_rate = in.sample_rate > 0 ? in.sample_rate : 48000;
@@ -256,7 +277,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
 
     if (mono.size() < static_cast<std::size_t>(in_rate) / 20) {
         r.warnings.push_back("input shorter than 50 ms: nothing to process");
-        run_stage(r, "analyze_in", true, audio_ms, [&] { r.before = analyze(mono, in_rate); });
+        run_stage(r, "analyze_in", true, audio_ms, [&] { r.before = analyze(in); });
         out = in;
         r.after = r.before;
         r.frames_out = out.frames();
@@ -269,8 +290,10 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     std::vector<FrameFeat> feats;
     seg.features(mono, feats);
 
-    run_stage(r, "analyze_in", true, audio_ms,
-              [&] { r.before = analyze(mono, in_rate, feats); });
+    run_stage(r, "analyze_in", true, audio_ms, [&] {
+        r.before = analyze(mono, in_rate, feats);
+        apply_multichannel_loudness(r.before, in);
+    });
 
     const double floor_hz = (p.preset == Preset::Talk) ? 55.0 : 30.0;
     const double denoise_strength = p.denoise_strength >= 0.0
@@ -306,7 +329,7 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     // ---------------------------------------------------- 4. Filler Killer
     run_stage(r, "filler", p.filler != FillerMode::Off, audio_ms, [&] {
         std::vector<FillerCandidate> cands;
-        r.fillers = detect_fillers(mono, in_rate, p.filler, &cands);
+        r.fillers = detect_fillers(mono, in_rate, p.filler, &cands, &feats);
         std::size_t removed = 0;
         double seconds = 0.0;
         if (!r.fillers.empty()) {
@@ -369,14 +392,44 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
         add_metric(r, "compressor", "average_reduction_db", c.gain_reduction_db);
     });
 
-    // ---------------------------------------------------- 10. loudness + true peak
+    // ---------------------------------------------------- music bed
+    const bool do_bed = p.music_bed.enabled && music && !music->data.empty();
+    run_stage(r, "music_bed", do_bed, audio_ms, [&] {
+        const MusicBedInfo b = mix_music_bed(mono, in_rate, feats, *music, p.music_bed);
+        add_metric(r, "music_bed", "speech_level_db", b.speech_level_db);
+        add_metric(r, "music_bed", "bed_level_db", b.bed_level_db);
+        add_metric(r, "music_bed", "duck_ratio", b.duck_ratio);
+        add_metric(r, "music_bed", "loops", static_cast<double>(b.loops));
+        add_metric(r, "music_bed", "tail_s", static_cast<double>(b.frames_added) / in_rate);
+    });
+
+    // ---------------------------------------------------- 10. output format
     const int out_channels = p.out_channels > 0 ? p.out_channels : in.channels;
+    const int out_rate = p.out_sample_rate > 0 ? p.out_sample_rate : in_rate;
+    const bool out_changed = out_rate != in_rate || out_channels != in.channels;
+    // The rate change happens before normalisation so the limiter measures and
+    // limits at the delivered rate: resampling after the limiter can move the
+    // measured loudness off target.
+    run_stage(r, "output", out_changed, audio_ms, [&] {
+        if (out_rate != in_rate) {
+            mono = resample(mono, in_rate, out_rate);
+            add_metric(r, "output", "resampled_to_hz", static_cast<double>(out_rate));
+        }
+        add_metric(r, "output", "channels", static_cast<double>(out_channels));
+    });
+
+    // ---------------------------------------------------- 11. loudness + true peak
     double target = p.target_lufs;
     if (target == 0.0) target = out_channels >= 2 ? -16.0 : -19.0;
+    // The chain works on one channel that is later copied to `out_channels`.
+    // N identical channels read channel_sum_db(N) louder on a BS.1770 meter, so
+    // the mono is normalised that much below the delivery target.
+    const double mono_target = target - channel_sum_db(out_channels);
     run_stage(r, "normalize", p.normalize, audio_ms, [&] {
         const LoudnessTargetInfo n =
-            normalize_loudness(mono, in_rate, target, p.target_true_peak_db, p.max_short_term,
+            normalize_loudness(mono, out_rate, mono_target, p.target_true_peak_db, p.max_short_term,
                                p.max_momentary);
+        add_metric(r, "normalize", "mono_target_lufs", mono_target);
         add_metric(r, "normalize", "target_lufs", n.target_lufs);
         add_metric(r, "normalize", "achieved_lufs", n.achieved_lufs);
         add_metric(r, "normalize", "error_lu", n.error_lu);
@@ -388,21 +441,10 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
         add_metric(r, "normalize", "limiter_max_reduction_db", n.limiter_max_reduction_db);
         add_metric(r, "normalize", "peak_rounds", static_cast<double>(n.peak_rounds));
     });
-
-    // ---------------------------------------------------- 11. output format
-    const int out_rate = p.out_sample_rate > 0 ? p.out_sample_rate : in_rate;
-    const bool out_changed = out_rate != in_rate || out_channels != in.channels;
-    run_stage(r, "output", out_changed, audio_ms, [&] {
-        if (out_rate != in_rate) {
-            mono = resample(mono, in_rate, out_rate);
-            add_metric(r, "output", "resampled_to_hz", static_cast<double>(out_rate));
-        }
-        add_metric(r, "output", "channels", static_cast<double>(out_channels));
-    });
     out = mono_to_channels(out_rate, mono, out_channels);
 
     r.frames_out = out.frames();
-    run_stage(r, "analyze_out", true, audio_ms, [&] { r.after = analyze(mono, out_rate); });
+    run_stage(r, "analyze_out", true, audio_ms, [&] { r.after = analyze(out); });
 
     // ---------------------------------------------------- conformance
     const double loud_tol = 1.0;
@@ -414,7 +456,21 @@ Report master(const AudioBuffer& in, const Params& p, AudioBuffer& out) {
     else
         r.warnings.push_back("true peak above ceiling: " +
                              std::to_string(r.after.true_peak_db) + " dBTP");
-    r.conformant = r.conformant_loudness && r.conformant_true_peak;
+    if (p.max_lra > 0.0 && r.after.lra > p.max_lra) {
+        r.conformant_lra = false;
+        r.warnings.push_back("loudness range " + std::to_string(r.after.lra) + " LU exceeds the maximum " +
+                             std::to_string(p.max_lra) + " LU (reported, not corrected)");
+    }
+    if (p.max_short_term < 0.0 && r.after.max_short_term > p.max_short_term + 0.1) {
+        r.conformant_short_term = false;
+        r.warnings.push_back("short term loudness above the configured maximum");
+    }
+    if (p.max_momentary < 0.0 && r.after.max_momentary > p.max_momentary + 0.1) {
+        r.conformant_momentary = false;
+        r.warnings.push_back("momentary loudness above the configured maximum");
+    }
+    r.conformant = r.conformant_loudness && r.conformant_true_peak && r.conformant_lra &&
+                   r.conformant_short_term && r.conformant_momentary;
     if (in.channels > 1)
         r.warnings.push_back(
             "multichannel input was summed to mono for processing and mapped back to " +

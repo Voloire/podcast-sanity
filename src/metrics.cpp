@@ -217,16 +217,13 @@ IntervalScore score_intervals(const std::vector<Interval>& detected,
         bool hit = false;
         for (std::size_t i = 0; i < truth.size(); i++) {
             if (truth_matched[i]) continue;
-            const std::size_t a = det.start > tol ? det.start - tol : 0;
-            const std::size_t b = det.end + tol;
-            // Overlap is enough: we only require that the detected region lies
-            // on the ground truth region within the tolerance.
-            if (det.start <= truth[i].end + tol && b >= truth[i].start && det.end + tol >= a) {
-                if (det.start + tol >= truth[i].start && det.end >= truth[i].start) {
-                    truth_matched[i] = true;
-                    hit = true;
-                    break;
-                }
+            // Both edges must sit on the ground truth within the tolerance, and
+            // the two regions must overlap.
+            if (det.start + tol >= truth[i].start && det.end <= truth[i].end + tol &&
+                det.start <= truth[i].end && det.end >= truth[i].start) {
+                truth_matched[i] = true;
+                hit = true;
+                break;
             }
         }
         if (hit) s.true_positive++;

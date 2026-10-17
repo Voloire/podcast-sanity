@@ -31,7 +31,7 @@ microphone capture needs the multimedia backend and a platform plugin.
 Install and remove:
 
 ```sh
-sudo apt install ./podcast-sanity_0.1.0_amd64.deb
+sudo apt install ./podcast-sanity_0.2.0_amd64.deb
 sudo apt remove podcast-sanity
 ```
 
@@ -56,7 +56,7 @@ cd build; cpack -C Release
 # -> podcast-sanity-<version>-win64.zip   (same tree, no installer)
 ```
 
-Notes:
+Build prerequisites:
 
 * `CMAKE_TOOLCHAIN_FILE` must be a `-D` cache variable. Putting it in the
   environment does nothing, and the build then silently loses both codecs.
@@ -80,9 +80,29 @@ publishes both artifacts, which is the supported way to produce a release.
 ## Codec availability
 
 `src/encode.cpp` compiles the encoders in only when their library is found:
-MP3 via LAME, FLAC and Ogg via libsndfile, WAV always. The export page hides any
+MP3 via LAME, FLAC, Ogg Vorbis and Opus via libsndfile, WAV always. Opus support
+is checked at runtime with `sf_format_check`. The export page hides any
 format whose encoder is missing, so a package that ships without LAME simply
 offers WAV and FLAC instead of failing at the last click.
 
 Because that degradation is silent, the Windows CI job exports one MP3 and one
 FLAC before packaging and fails if either file is missing.
+
+## Debian verification (0.2.0)
+
+Performed on the owner's Ubuntu 26.04 workstation (GCC 15.2, Qt 6.10.2,
+CMake 4.2.3, libebur128 1.2.6):
+
+* release configure, build and `ctest`: **100% tests passed out of 9**;
+* `cpack -G DEB` produced `podcast-sanity_0.2.0_amd64.deb` (about 1.24 MB); the
+  installed payload ran the GUI self-test under `xvfb-run` and passed;
+* the `.deb` upgraded an existing 0.1.0 install to 0.2.0 and removed cleanly,
+  leaving no files behind;
+* `desktop-file-validate` and `appstreamcli validate` both pass;
+* the ffmpeg stereo cross-check reads **I: -16.0 LUFS**, matching Windows;
+* the ASan/UBSan build (GUI off) passes the unit and base end-to-end suites with
+  no sanitizer report.
+
+The Debian package installs the GPL text and the third-party notices under
+`/usr/share/doc/podcast-sanity/`, as Debian Policy §12.5 requires. Subjective
+listening, live recording and interactive preview remain pending.

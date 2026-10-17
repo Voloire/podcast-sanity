@@ -8,6 +8,7 @@
 
 #include "sanity/audio.hpp"
 #include "sanity/dsp.hpp"
+#include "sanity/music_bed.hpp"
 
 namespace sanity {
 
@@ -41,6 +42,9 @@ struct Params {
 
     // --- Filler Killer ---------------------------------------------------
     FillerMode filler = FillerMode::Off;
+
+    // --- music bed -------------------------------------------------------
+    MusicBedOptions music_bed;
 
     // --- output ----------------------------------------------------------
     int out_sample_rate = 0;             // 0 = keep input rate
@@ -119,6 +123,9 @@ struct Report {
 
     bool conformant_loudness = false;
     bool conformant_true_peak = false;
+    bool conformant_lra = true;         // max_lra == 0 or after.lra <= max_lra
+    bool conformant_short_term = true;  // max_short_term == 0 or after.max_short_term <= limit + 0.1
+    bool conformant_momentary = true;   // max_momentary == 0 or after.max_momentary <= limit + 0.1
     bool conformant = false;
     std::vector<std::string> warnings;
 
@@ -141,10 +148,23 @@ Analysis analyze(const std::vector<float>& mono, int sample_rate);
 Analysis analyze(const std::vector<float>& mono, int sample_rate,
                  const std::vector<FrameFeat>& feats);
 
-// Filler Killer: hesitation candidate detection (acoustic, no ASR).
+// Measures an interleaved buffer: loudness, true peak and peak statistics are
+// BS.1770 multichannel values; the content features (noise, hum, RT60, speech
+// ratio) are measured on the mono sum, which is what the chain processes.
+Analysis analyze(const AudioBuffer& b);
+// Overwrites the loudness and peak fields of `a` with the multichannel
+// measurement of `b` and sets a.channels. No-op for mono.
+void apply_multichannel_loudness(Analysis& a, const AudioBuffer& b);
+
+// Filler Killer: hesitation candidate detection (acoustic, no ASR). The
+// detector is calibrated at 48 kHz; other rates are analysed on a resampled
+// copy and the hits are mapped back to `sample_rate`. The optional `feats` are
+// reused only when `sample_rate == 48000` and
+// `feats->size() == mono.size() / 480`; otherwise they are ignored.
 std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
                                       FillerMode mode,
-                                      std::vector<FillerCandidate>* candidates = nullptr);
+                                      std::vector<FillerCandidate>* candidates = nullptr,
+                                      const std::vector<FrameFeat>* feats = nullptr);
 // Cuts the detected regions and joins the two sides with an equal power
 // crossfade, so no digital hole is heard where the hesitation used to be.
 std::vector<float> remove_fillers(const std::vector<float>& mono, int sample_rate,
@@ -153,7 +173,8 @@ std::vector<float> remove_fillers(const std::vector<float>& mono, int sample_rat
 
 // Full mastering run. `out` matches the requested output rate/channels.
 Report master(const AudioBuffer& in, const Params& params, AudioBuffer& out);
+Report master(const AudioBuffer& in, const Params& params, const AudioBuffer* music, AudioBuffer& out);
 
-std::string params_hash(const Params& p);
+std::string params_hash(const Params& p, const AudioBuffer* music = nullptr);
 
 }  // namespace sanity

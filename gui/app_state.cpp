@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 
 #include "sanity/loudness.hpp"
 #include "theme.h"
@@ -82,16 +83,25 @@ QString analysis_line(const sanity::Analysis& a) {
 class AppState::Worker : public QObject {
     Q_OBJECT
 public slots:
-    void run_job(sanity::AudioBuffer in, sanity::Params p) {
-        QElapsedTimer t;
-        t.start();
-        sanity::AudioBuffer out;
-        const sanity::Report rep = sanity::master(in, p, out);
-        emit finished(true, rep, out, QString());
+    void run_job(sanity::AudioBuffer in, sanity::Params p,
+                 std::shared_ptr<const sanity::AudioBuffer> music, int job) {
+        try {
+            sanity::AudioBuffer out;
+            const sanity::Report rep = sanity::master(in, p, music.get(), out);
+            emit finished(true, rep, out, QString(), job);
+        } catch (const std::exception& e) {
+            emit finished(false, sanity::Report{}, sanity::AudioBuffer{},
+                          QStringLiteral("Errore interno durante l'elaborazione: %1")
+                              .arg(QString::fromUtf8(e.what())),
+                          job);
+        } catch (...) {
+            emit finished(false, sanity::Report{}, sanity::AudioBuffer{},
+                          QStringLiteral("Errore interno durante l'elaborazione"), job);
+        }
     }
 
 signals:
-    void finished(bool ok, sanity::Report rep, sanity::AudioBuffer out, QString error);
+    void finished(bool ok, sanity::Report rep, sanity::AudioBuffer out, QString error, int job);
 };
 
 // ------------------------------------------------------------------ AppState
@@ -104,12 +114,18 @@ AppState::AppState(QObject* parent) : QObject(parent) {
     qRegisterMetaType<sanity::AudioBuffer>("sanity::AudioBuffer");
     qRegisterMetaType<sanity::Report>("sanity::Report");
     qRegisterMetaType<sanity::Params>("sanity::Params");
+    qRegisterMetaType<std::shared_ptr<const sanity::AudioBuffer>>("std::shared_ptr<const sanity::AudioBuffer>");
 
     worker_ = new Worker();
     worker_->moveToThread(&worker_thread_);
     connect(&worker_thread_, &QThread::finished, worker_, &QObject::deleteLater);
     connect(worker_, &Worker::finished, this, [this](bool ok, sanity::Report rep,
-                                                     sanity::AudioBuffer out, QString error) {
+                                                     sanity::AudioBuffer out, QString error,
+                                                     int job) {
+        if (job == cancelled_job_) {
+            emit status_message(QStringLiteral("Elaborazione annullata"));
+            return;
+        }
         busy_ = false;
         if (ok) {
             set_mastered(out, rep);
@@ -188,6 +204,45 @@ void AppState::set_params(const sanity::Params& p) {
     emit params_changed();
 }
 
+bool AppState::open_audio_file(const QString& path, QString* error) {
+    sanity::AudioBuffer b;
+    std::string err;
+    if (!sanity::audio_read(path.toStdString(), b, err)) {
+        if (error) *error = QString::fromStdString(err);
+        return false;
+    }
+    session_.name = QFileInfo(path).completeBaseName();
+    set_audio(b, path, QStringLiteral("file"));
+    return true;
+}
+
+bool AppState::set_music(const QString& path, QString* error) {
+    auto music = std::make_shared<sanity::AudioBuffer>();
+    std::string err;
+    if (!sanity::audio_read(path.toStdString(), *music, err)) {
+        if (error) *error = QString::fromStdString(err);
+        return false;
+    }
+    set_music_buffer(music, path);
+    return true;
+}
+
+void AppState::set_music_buffer(std::shared_ptr<const sanity::AudioBuffer> music, const QString& label) {
+    session_.music = std::move(music);
+    session_.music_path = label;
+    session_.has_music = session_.music && !session_.music->data.empty();
+    session_.has_report = false;
+    session_.has_mastered = false;
+    emit music_changed();
+    emit mastered_changed();
+}
+
+void AppState::clear_music() {
+    session_.params.music_bed.enabled = false;
+    set_music_buffer({}, {});
+    emit params_changed();
+}
+
 sanity::Params AppState::default_params() const {
     QSettings st;
     sanity::Params p;
@@ -215,18 +270,23 @@ void AppState::start_mastering(const sanity::Params& p) {
         return;
     }
     busy_ = true;
+    job_id_++;
     session_.params = p;
     emit mastering_started();
     emit status_message(QStringLiteral("Elaborazione in corso..."));
     QMetaObject::invokeMethod(worker_, "run_job", Qt::QueuedConnection,
                               Q_ARG(sanity::AudioBuffer, session_.audio),
-                              Q_ARG(sanity::Params, p));
+                              Q_ARG(sanity::Params, p),
+                              Q_ARG(std::shared_ptr<const sanity::AudioBuffer>, session_.music),
+                              Q_ARG(int, job_id_));
 }
 
 void AppState::cancel_mastering() {
     // The pipeline is not interruptible mid stage; cancellation only prevents
     // the result from being adopted.
+    cancelled_job_ = job_id_;
     busy_ = false;
+    emit mastering_finished(false, QStringLiteral("Annullato"));
 }
 
 // ------------------------------------------------------------------- library
@@ -246,6 +306,7 @@ QVector<Session> AppState::library_sessions() const {
         s.source_kind = o.value("source_kind").toString();
         s.created = o.value("created").toString();
         s.notes = o.value("notes").toString();
+        s.music_path = o.value("music").toObject().value("path").toString();
         s.saved = true;
         const QJsonObject mix = o.value("master").toObject();
         if (!mix.isEmpty()) {
@@ -264,13 +325,8 @@ QVector<Session> AppState::library_sessions() const {
         const QJsonObject in = o.value("input").toObject();
         s.audio.sample_rate = in.value("sample_rate").toInt(48000);
         s.audio.channels = in.value("channels").toInt(1);
-        const double secs = in.value("seconds").toDouble(0.0);
-        if (secs > 0.0) {
-            s.has_audio = true;
-            s.audio.data.assign(static_cast<std::size_t>(secs * s.audio.sample_rate) *
-                                    static_cast<std::size_t>(s.audio.channels),
-                                0.0f);
-        }
+        s.seconds_hint = in.value("seconds").toDouble(0.0);
+        s.has_audio = false;  // the samples stay on disk until load_session()
         out.push_back(s);
     }
     std::sort(out.begin(), out.end(), [](const Session& a, const Session& b) {
@@ -309,6 +365,21 @@ QString AppState::save_session(bool also_write_audio) {
     in.insert("channels", session_.audio.channels);
     in.insert("seconds", session_.duration());
     o.insert("input", in);
+    const auto& bed = session_.params.music_bed;
+    QJsonObject music;
+    music.insert("path", session_.music_path);
+    music.insert("enabled", bed.enabled);
+    music.insert("bed_level_db", bed.bed_level_db);
+    music.insert("duck_db", bed.duck_db);
+    music.insert("attack_ms", bed.attack_ms);
+    music.insert("release_ms", bed.release_ms);
+    music.insert("hold_ms", bed.hold_ms);
+    music.insert("fade_in_s", bed.fade_in_s);
+    music.insert("fade_out_s", bed.fade_out_s);
+    music.insert("offset_s", bed.offset_s);
+    music.insert("tail_s", bed.tail_s);
+    music.insert("loop", bed.loop);
+    o.insert("music", music);
     if (session_.has_report) {
         QJsonObject m;
         m.insert("integrated_lufs", session_.report.after.integrated_lufs);
@@ -349,6 +420,7 @@ bool AppState::load_session(const QString& id, QString* error) {
     }
     Session s;
     s.id = id;
+    s.params = default_params();
     QFile sf(dir.filePath(kSessionName));
     if (sf.open(QIODevice::ReadOnly)) {
         const QJsonObject o = QJsonDocument::fromJson(sf.readAll()).object();
@@ -357,6 +429,20 @@ bool AppState::load_session(const QString& id, QString* error) {
         s.source_kind = o.value("source_kind").toString();
         s.created = o.value("created").toString();
         s.notes = o.value("notes").toString();
+        const QJsonObject music = o.value("music").toObject();
+        s.music_path = music.value("path").toString();
+        auto& bed = s.params.music_bed;
+        bed.enabled = music.value("enabled").toBool(bed.enabled);
+        bed.bed_level_db = music.value("bed_level_db").toDouble(bed.bed_level_db);
+        bed.duck_db = music.value("duck_db").toDouble(bed.duck_db);
+        bed.attack_ms = music.value("attack_ms").toDouble(bed.attack_ms);
+        bed.release_ms = music.value("release_ms").toDouble(bed.release_ms);
+        bed.hold_ms = music.value("hold_ms").toDouble(bed.hold_ms);
+        bed.fade_in_s = music.value("fade_in_s").toDouble(bed.fade_in_s);
+        bed.fade_out_s = music.value("fade_out_s").toDouble(bed.fade_out_s);
+        bed.offset_s = music.value("offset_s").toDouble(bed.offset_s);
+        bed.tail_s = music.value("tail_s").toDouble(bed.tail_s);
+        bed.loop = music.value("loop").toBool(bed.loop);
     } else {
         s.name = id;
     }
@@ -372,16 +458,40 @@ bool AppState::load_session(const QString& id, QString* error) {
         s.mastered = mst;
         s.has_mastered = true;
     }
-    QFile rf(dir.filePath(kReportName));
-    if (rf.open(QIODevice::ReadOnly)) {
-        // The report is only used for display; the numeric fields the app shows
-        // are re-derived from the mastered audio on load.
-        s.has_report = s.has_mastered;
+    if (!s.music_path.isEmpty()) {
+        auto music = std::make_shared<sanity::AudioBuffer>();
+        std::string music_error;
+        if (sanity::audio_read(s.music_path.toStdString(), *music, music_error)) {
+            s.music = music;
+            s.has_music = !music->data.empty();
+        }
+    }
+    s.has_report = false;
+    if (s.has_mastered) {
+        // The engine is the source of truth: the numeric report is re-derived
+        // from the mastered audio; report.json on disk is for humans and tools.
+        s.report = {};
+        s.report.version = SANITY_VERSION;
+        s.report.params = s.params;
+        s.report.before = sanity::analyze(s.audio);
+        s.report.after = sanity::analyze(s.mastered);
+        const double target = s.params.target_lufs != 0.0
+                                  ? s.params.target_lufs
+                                  : (s.mastered.channels > 1 ? -16.0 : -19.0);
+        s.report.conformant_loudness = std::fabs(s.report.after.integrated_lufs - target) <= 1.0;
+        s.report.conformant_true_peak =
+            s.report.after.true_peak_db <= s.params.target_true_peak_db + 0.05;
+        s.report.conformant = s.report.conformant_loudness && s.report.conformant_true_peak;
+        s.has_report = true;
     }
     session_ = s;
     emit audio_changed();
     emit mastered_changed();
+    emit params_changed();
+    emit music_changed();
     emit status_message(QStringLiteral("Sessione \"%1\" caricata").arg(s.name));
+    if (!s.music_path.isEmpty() && !s.has_music)
+        emit status_message(QStringLiteral("Musica di sottofondo non trovata: %1").arg(s.music_path));
     return true;
 }
 

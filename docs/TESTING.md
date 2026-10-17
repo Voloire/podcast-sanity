@@ -1,6 +1,6 @@
 # Testing podcast-sanity
 
-Three suites, all driven by `ctest`, all autonomous — no human, no hardware and
+Automated suites driven by `ctest` — no human, no hardware and
 no golden files that need regenerating by hand.
 
 ```
@@ -9,9 +9,34 @@ cd build && ctest --output-on-failure
 
 | Suite | Target | Size | Time | What it protects |
 |-------|--------|------|------|------------------|
-| `unit` | `sanity_tests` | 22 cases, 127 checks | ~0.6 s | The DSP primitives |
-| `e2e` | `sanity_e2e_tests` | 8 cases, 42 checks | ~40 s | The whole chain against ground truth |
-| `gui` | `podcast-sanity --selftest` | walks 7 pages + master + export | ~5 s | The interface wiring |
+| `unit` | `sanity_tests` | 36 cases / 1342 checks without libebur128 (39 / 1353 with it) | ~33 s | DSP, codecs, reports and music bed |
+| `cli_missing_value`, `cli_help`, `cli_list_profiles` | renderer | argument/profile checks | <1 s | CLI contract |
+| `cli_music_bed` | PowerShell + renderer | generation, mix, report and tail | ~0.7 s | CLI bed switches (Windows) |
+| `e2e` | `sanity_e2e_tests` | 13 cases / 222 checks | ~9 s | Whole chain against ground truth |
+| `e2e_30s` | `sanity_e2e_tests --seconds 30` | 13 cases / 222 checks | ~23 s | Speech and filler margins |
+| `e2e_45s` | `sanity_e2e_tests --seconds 45` | 13 cases / 222 checks | ~36 s | SNR margin |
+| `e2e_44k` | `sanity_e2e_tests --rate 44100` | 13 cases / 213 checks | ~9 s | Alternate-rate corpus |
+| `gui` | `podcast-sanity --selftest` | 7 pages + bed + master + MP3 | ~4 s | Interface wiring |
+| `gui_shots` | self-test with screenshots | Studio, Light and Dark captures | ~9 s | Windows visual evidence |
+
+Windows release verification: **100% tests passed out of 11** (about two minutes).
+Linux/Debian release verification: **100% tests passed out of 9** on an Ubuntu
+26.04 workstation (unit, the four CLI checks, the four end-to-end runs and the
+GUI under `xvfb-run`). libebur128 is linked there, so the unit suite is
+39 cases / 1353 checks; the non-ebur128 count still matches Windows at
+36 cases / 1342 checks. The Debian machine is a 15 W ultrabook (i7-8550U), so the
+wall-clock is roughly six to ten times the Windows desktop numbers above; the
+900 s CTest timeout still covers the longest case (`e2e_45s`, ~211 s) with room to
+spare. Manual listening, recording/preview interaction and installer Finish
+behavior remain pending because desktop control and audio listening are still
+unavailable.
+
+An ASan/UBSan build (`SANITY_WITH_GUI=OFF`) passes the unit and base end-to-end
+suites with no sanitizer report. The instrumented build multiplies wall-clock
+about five times, so the `unit`, `e2e`, `e2e_44k` and `e2e_30s` runs fit their
+timeouts on this machine while `e2e_45s` reaches the 900 s CTest cap; the
+sanitizer CI job therefore runs `unit` and `e2e` only and leaves the 30 s / 45 s /
+44.1 kHz variants to the release job.
 
 ---
 
@@ -35,8 +60,9 @@ Covered:
   features are always 10 ms apart regardless of rate.
 * **Corpus generator**: the envelope, the isolated hesitations, and
   `Degradations::filler_every == 0` meaning "never insert a hesitation".
-* **Containers**: WAV round trip for 16-bit, 24-bit and float, and the JSON
-  writer's escaping and number formatting.
+* **Containers**: WAV round trip for 16-bit, 24-bit and float; the JSON writer is
+  pinned by `json writer puts scalars on the key line, escapes strings and trims
+  numbers`.
 
 ---
 
@@ -61,17 +87,40 @@ hesitations).
 | Check | Threshold | Rationale |
 |-------|-----------|-----------|
 | Loudness | within ±1 LU of −19 (mono) | The delivery tolerance; the engine actually lands within 0.05 LU |
-| True peak | ≤ −1.0 dBTP | Measured on the written output, not on an internal buffer |
+| True peak | ≤ −1.0 dBTP | Measured on the output buffer before quantisation; the 16-bit rounding adds less than 0.0001 dB |
 | Filler recall | ≥ 0.75 | Ground-truth hesitations must be found |
-| Filler precision | ≥ 0.75 | Words must not be cut |
-| Removed filler time | ≤ truth × 1.6 + 0.2 s | Catches over-eager removal that still scores well by interval overlap |
+| Filler precision | ≥ 0.75 at 48 kHz; at most 1 false positive at every rate | Bounds accidental word cuts |
+| Speech preservation | ≥ 5 dB | The cleaned speech still matches the clean reference |
+| Removed filler time | ≤ truth × 1.6 + 0.2 s (+0.5 s off 48 kHz) | Bounds excess cuts |
 | No false positives | 0 on a no-hesitation corpus | The corpus is regenerated with `filler_every = 0` |
-| SNR improvement | ≥ +2 dB on home and rough | Cleaning must actually clean |
+| SNR improvement | ≥ +1.5 dB on home and rough | Cleaning must actually clean |
 | SI-SDR (home) | no worse than the input | The denoiser must not add artefacts |
-| SI-SDR (rough) | ≥ −1.5 dB | Allows for the intentional EQ |
+| SI-SDR (rough) | ≥ input SI-SDR − 1.5 dB | Bounds quality loss on damaged material |
 | Determinism | byte-identical audio and equal `params_hash` | Same input and parameters, same bytes, every time |
 | Report completeness | every enabled stage present, with metrics | The observability contract |
 | Music preset | runs and stays inside the tolerance | A second chain, not just talk |
+| Music bed | conformant, frames = plain + tail, same filler count, deterministic | Mix loudness covers the bed; filler cuts apply to speech alone |
+| Delivery | decoded recommended MP3 within ±1 LU of −19 and ≤0 dBTP | Covers encoder effects separately from the master ceiling |
+
+The corpus is not rate-invariant: consonant noise consumes one random value per
+sample. The 44.1 kHz rough realization cuts one look-alike (score 0.71), giving
+precision 0.5 on its short take; its expected allowance was approved explicitly.
+Detection itself runs at 48 kHz with hits mapped back to input coordinates.
+
+Measured on the executed runs; the worst profile is `rough` in every run, and
+speech preservation is measured on filler-off runs:
+
+| Run | Speech preservation | SNR gain `home` | SNR gain `rough` |
+|-----|---------------------|-----------------|------------------|
+| 12 s | 7.03 dB | +2.35 dB | +9.46 dB |
+| 20 s | 6.22 dB | +2.46 dB | +2.03 dB |
+| 30 s | 5.86 dB | +2.30 dB | +2.13 dB |
+| 45 s | 6.30 dB | +3.10 dB | +1.66 dB |
+| 44.1 kHz | 7.57 dB | +2.45 dB | +8.09 dB |
+
+Worst measured margins: speech 5.86 − 5.0 = **0.86 dB**; SNR 1.66 − 1.5 =
+**0.16 dB**. The independent ffmpeg stereo cross-check from Task 1.1 read
+**I: −16.0 LUFS**. Windows does not link libebur128.
 
 ### 2.3 Two measurement details worth remembering
 
@@ -117,6 +166,16 @@ opt-in.
 
 ## 4. The GUI self test
 
+On Windows, `ctest -C Release` runs the native Windows platform plugin. The build
+deploys Qt beside the executable automatically. The Windows codec test also
+round-trips Unicode filenames and checks stereo channel separation in WAV,
+FLAC, Ogg, Opus and MP3 (when the codecs are present).
+
+`packaging/test-windows-msi.ps1 -Msi <path>` tests the actual installed MSI with
+SDK paths removed, saving GUI screenshots and logs. This leaves the per-user
+installation available from the desktop and Start menu. See
+[packaging](../packaging/README.md#windows--msi).
+
 ```
 xvfb-run -a --server-args="-screen 0 1400x900x24" \
   ./podcast-sanity --selftest --selftest-seconds 12
@@ -130,8 +189,8 @@ It:
 2. generates a synthetic episode if no audio was passed on the command line;
 3. starts mastering through the *same* `AppState` path the button uses, on the
    worker thread;
-4. checks the report contract (stages present, conformant, true peak on the
-   ceiling) and exits non-zero if it is violated;
+4. checks the report contract (music bed enabled, stages present, conformant,
+   true peak below the ceiling) and exits non-zero if it is violated;
 5. exports an MP3 with the recommended bitrate and fails if the file is missing
    or implausibly small;
 6. prints a one-line summary and exits.
@@ -141,7 +200,8 @@ It:
 
 Adding `--selftest-shots DIR` captures every page with `QWidget::grab()` as a PNG
 — once during the walk and again for the pages that only have content after a
-master exists (Standards, Export, Diagnostics). That is the visual-regression
+master exists (Master result, music card, Standards, Export, Diagnostics), with
+additional Light/Dark captures in `themes/`. That is the visual-regression
 check: it is how the double-escaped `\u25CF`/`\n` sequences in the button labels
 and the brand wordmark were found, and it needs no X11 tooling:
 

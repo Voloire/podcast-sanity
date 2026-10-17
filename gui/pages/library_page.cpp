@@ -1,4 +1,5 @@
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -6,9 +7,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QProcess>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include "pages/pages.h"
@@ -165,7 +166,7 @@ void LibraryPage::delete_selected() {
 void LibraryPage::reveal_selected() {
     const QString id = selected_id();
     const QString dir = QDir(AppState::get().library_dir()).filePath(id.isEmpty() ? "." : id);
-    QProcess::startDetached(QStringLiteral("xdg-open"), {dir});
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
 }
 
 void LibraryPage::export_selected() {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(podcast-sanity VERSION 0.1.0 LANGUAGES CXX)
+project(podcast-sanity VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,10 +22,14 @@ endif()
 option(SANITY_WITH_GUI "Build the Qt6 desktop application" ON)
 option(SANITY_WITH_EBUR128 "Cross-check loudness against libebur128 in tests" ON)
 option(SANITY_SANITIZE "Build the core with ASan/UBSan" OFF)
+option(SANITY_REQUIRE_CODECS "Fail if MP3 or FLAC/Ogg support is missing" OFF)
 
 set(SANITY_CORE_SOURCES
   src/json.cpp
   src/io_wav.cpp
+  src/io_sndfile.cpp
+  src/distribution.cpp
+  src/music_bed.cpp
   src/dsp.cpp
   src/loudness.cpp
   src/clean.cpp
@@ -40,6 +44,11 @@ set(SANITY_CORE_SOURCES
 
 add_library(sanity_core STATIC ${SANITY_CORE_SOURCES})
 target_include_directories(sanity_core PUBLIC include)
+# The version travels with the core: the report and the summary header read it
+# from Report::version, which pipeline.cpp fills from SANITY_VERSION. Without
+# this define the core keeps its 0.1.0 fallback while the executables are built
+# at the project version, so --version and the report would disagree.
+target_compile_definitions(sanity_core PUBLIC SANITY_VERSION="${PROJECT_VERSION}")
 if(SANITY_SANITIZE)
   target_compile_options(sanity_core PUBLIC -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(sanity_core PUBLIC -fsanitize=address,undefined)
@@ -57,13 +66,13 @@ set(SANITY_HAVE_SNDFILE FALSE)
 if(PkgConfig_FOUND AND NOT MSVC)
   pkg_check_modules(MP3LAME QUIET lame)
   pkg_check_modules(SNDFILE QUIET sndfile)
-  if(MP3LAME_FOUND)
+  if(MP3LAME_FOUND AND NOT SANITY_HAVE_MP3)
     set(SANITY_HAVE_MP3 TRUE)
     set(MP3LAME_LIBRARY "${MP3LAME_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIRS})
   endif()
-  if(SNDFILE_FOUND)
+  if(SNDFILE_FOUND AND NOT SANITY_HAVE_SNDFILE)
     set(SANITY_HAVE_SNDFILE TRUE)
     set(SNDFILE_LIBRARY "${SNDFILE_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARIES})
@@ -103,6 +112,9 @@ else()
   message(STATUS "FLAC/Ogg export disabled: libsndfile not found")
 endif()
 
+if(SANITY_REQUIRE_CODECS AND (NOT SANITY_HAVE_MP3 OR NOT SANITY_HAVE_SNDFILE))
+  message(FATAL_ERROR "Release package requires LAME and libsndfile")
+endif()
 target_compile_definitions(sanity_core PUBLIC
   SANITY_HAVE_MP3=$<BOOL:${SANITY_HAVE_MP3}>
   SANITY_HAVE_SNDFILE=$<BOOL:${SANITY_HAVE_SNDFILE}>)
@@ -136,7 +148,26 @@ endif()
 
 add_test(NAME unit COMMAND sanity_tests)
 
+# CLI contract: a missing option value is an error, not a crash; --help lists
+# the distribution switch added in Phase 3.
+add_test(NAME cli_missing_value COMMAND podcast-sanity-render in.wav --out)
+set_tests_properties(cli_missing_value PROPERTIES
+  PASS_REGULAR_EXPRESSION "option --out needs a value")
+add_test(NAME cli_help COMMAND podcast-sanity-render --help)
+set_tests_properties(cli_help PROPERTIES PASS_REGULAR_EXPRESSION "--deliver")
+add_test(NAME cli_list_profiles COMMAND podcast-sanity-render --list-profiles)
+set_tests_properties(cli_list_profiles PROPERTIES
+  PASS_REGULAR_EXPRESSION "podcast-voice .*\\(recommended\\)")
+
 # ---- end-to-end harness ----------------------------------------------------
+if(WIN32)
+  add_test(NAME cli_music_bed
+    COMMAND ${CMAKE_COMMAND} -E env SANITY_TMP=${CMAKE_CURRENT_BINARY_DIR}
+            powershell -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_music_bed.ps1
+            $<TARGET_FILE:podcast-sanity-render>)
+  set_tests_properties(cli_music_bed PROPERTIES PASS_REGULAR_EXPRESSION "OK music bed")
+endif()
+
 # Generates synthetic episodes with ground truth, runs the whole chain and
 # judges the result. Slower than the unit tests, so it is a separate target.
 add_executable(sanity_e2e_tests tests/e2e_main.cpp)
@@ -146,12 +177,24 @@ target_compile_definitions(sanity_e2e_tests PRIVATE SANITY_VERSION="${PROJECT_VE
 add_test(NAME e2e COMMAND sanity_e2e_tests)
 set_tests_properties(e2e PROPERTIES TIMEOUT 900)
 
+# The detector is calibrated at 48 kHz; this run proves 44.1 kHz material gets
+# the same precision and recall.
+add_test(NAME e2e_44k COMMAND sanity_e2e_tests --rate 44100)
+set_tests_properties(e2e_44k PROPERTIES TIMEOUT 900)
+
+add_test(NAME e2e_30s COMMAND sanity_e2e_tests --seconds 30)
+add_test(NAME e2e_45s COMMAND sanity_e2e_tests --seconds 45)
+set_tests_properties(e2e_30s e2e_45s PROPERTIES TIMEOUT 900)
+
 # ---- GUI ------------------------------------------------------------------
 if(SANITY_WITH_GUI)
-  find_package(Qt6 QUIET COMPONENTS Widgets Multimedia)
+  # Multimedia is optional: without it the app still records from a file or the
+  # synthetic corpus, so a Qt install that lacks the module must not disable the
+  # whole GUI.
+  find_package(Qt6 QUIET COMPONENTS Widgets OPTIONAL_COMPONENTS Multimedia)
   if(Qt6_FOUND)
     set(CMAKE_AUTOMOC ON)
-    add_executable(podcast-sanity
+    add_executable(podcast-sanity WIN32
       gui/main.cpp
       gui/mainwindow.h
       gui/mainwindow.cpp
@@ -163,6 +206,8 @@ if(SANITY_WITH_GUI)
       gui/app_state.cpp
       gui/audio_capture.cpp
       gui/widgets.cpp
+      gui/studio_widgets.h
+      gui/studio_widgets.cpp
       gui/theme.cpp
       gui/pages/page_base.cpp
       gui/pages/record_page.cpp
@@ -176,6 +221,16 @@ if(SANITY_WITH_GUI)
     target_link_libraries(podcast-sanity PRIVATE sanity_core Qt6::Widgets)
     target_include_directories(podcast-sanity PRIVATE gui)
     target_compile_definitions(podcast-sanity PRIVATE SANITY_VERSION="${PROJECT_VERSION}")
+    if(WIN32)
+      configure_file(packaging/windows.rc.in windows.rc @ONLY)
+      target_sources(podcast-sanity PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
+    endif()
+    qt_add_resources(podcast-sanity app_icon PREFIX "/" BASE data
+      FILES data/podcast-sanity.ico)
+    qt_add_resources(podcast-sanity app_fonts PREFIX "/fonts" BASE data/fonts
+      FILES data/fonts/Ubuntu-Regular.ttf data/fonts/Ubuntu-Medium.ttf
+            data/fonts/Ubuntu-Bold.ttf data/fonts/UbuntuMono-Regular.ttf)
+    install(FILES data/fonts/UFL-1.0.txt DESTINATION licenses/ubuntu-font)
     if(TARGET Qt6::Multimedia)
       target_link_libraries(podcast-sanity PRIVATE Qt6::Multimedia)
       target_compile_definitions(podcast-sanity PRIVATE SANITY_HAVE_QTMM=1)
@@ -200,7 +255,18 @@ if(SANITY_WITH_GUI)
     # Automated interface test: walks every page, runs the chain and exports an
     # MP3. Runs under a virtual display in CI.
     find_program(XVFB_RUN xvfb-run)
-    if(XVFB_RUN)
+    if(WIN32)
+      find_program(SANITY_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
+      add_custom_command(TARGET podcast-sanity POST_BUILD
+          COMMAND "${SANITY_WINDEPLOYQT}" --release --no-translations --no-compiler-runtime
+                  --no-opengl-sw --skip-plugin-types tls,networkinformation,generic,qmltooling
+                "$<TARGET_FILE:podcast-sanity>"
+        VERBATIM)
+      add_test(NAME gui COMMAND podcast-sanity --selftest --selftest-seconds 8)
+      add_test(NAME gui_shots COMMAND podcast-sanity --selftest --selftest-seconds 8
+               --selftest-shots "${CMAKE_CURRENT_BINARY_DIR}/shots")
+      set_tests_properties(gui_shots PROPERTIES TIMEOUT 300 PASS_REGULAR_EXPRESSION "selftest: OK")
+    elseif(XVFB_RUN)
       add_test(NAME gui
         COMMAND ${XVFB_RUN} -a "--server-args=-screen 0 1400x900x24"
                 $<TARGET_FILE:podcast-sanity> --selftest --selftest-seconds 8)
@@ -211,13 +277,23 @@ if(SANITY_WITH_GUI)
     endif()
     set_tests_properties(gui PROPERTIES TIMEOUT 300)
   else()
-    message(STATUS "Qt6 not found: GUI skipped")
+    message(FATAL_ERROR "SANITY_WITH_GUI=ON requires Qt6 Widgets")
   endif()
 endif()
 
 # ---- install rules --------------------------------------------------------
 include(GNUInstallDirs)
 install(TARGETS podcast-sanity-render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# Debian Policy §12.5 requires a copyright file under /usr/share/doc/<package>.
+# CPack's DEB generator does not create one, so the GPL text and the third-party
+# notices are installed explicitly on Linux.
+if(NOT WIN32)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/podcast-sanity
+          RENAME copyright)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/THIRD-PARTY.md"
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/podcast-sanity)
+endif()
 if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
@@ -232,7 +308,7 @@ if(UNIX)
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
   install(FILES data/podcast-sanity.svg
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
-          RENAME podcast-sanity.svg)
+           RENAME podcast-sanity.svg)
 endif()
 
 # The codec libraries come from vcpkg as DLLs on Windows, so the package must
@@ -263,8 +339,8 @@ set(CPACK_PACKAGE_NAME "podcast-sanity")
 set(CPACK_PACKAGE_VENDOR "Voloire")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Local podcast recording and automatic mastering")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_CONTACT "Voloire <dev@voloire.local>")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/voloire/podcast-sanity")
+set(CPACK_PACKAGE_CONTACT "Voloire")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Voloire/podcast-sanity")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
 # Without this the WiX default is "<name> <version>", which puts every release
@@ -284,6 +360,13 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 # stacking next to it.
 set(CPACK_WIX_UPGRADE_GUID "9F2C6D4E-7B31-4A58-9C0E-2D5A6F1B8E30")
 set(CPACK_WIX_PROGRAM_MENU_FOLDER "podcast-sanity")
+set(CPACK_WIX_PROPERTY_ARPHELPLINK "https://github.com/Voloire/podcast-sanity/issues")
+set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "https://github.com/Voloire/podcast-sanity")
+# WixUI_InstallDir already defines ARPNOMODIFY=1.
+set(CPACK_WIX_PROPERTY_ARPCOMMENTS "Record and master a podcast locally, offline")
+# Accepted per-user CPack warnings: same-version reinstalls (ICE61), shortcut
+# component layout (ICE69), and per-user directories by design (ICE90/ICE91).
+set(CPACK_WIX_LIGHT_EXTRA_FLAGS "-sice:ICE61" "-sice:ICE69" "-sice:ICE90" "-sice:ICE91")
 # Branding images are optional: only reference the ones that exist so the MSI
 # still builds on a bare checkout.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
@@ -296,10 +379,10 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-dialog.bmp")
   set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-dialog.bmp")
 endif()
-# The Windows bundle must carry the Qt runtime and the codec DLLs (optional).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
-  set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
-endif()
+set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
+set(CPACK_WIX_EXTENSIONS WixUIExtension WixUtilExtension)
+set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Podcast Sanity")
+set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOX "1")
 
 if(WIN32)
   # CPack's WiX generator accepts only a .txt or .rtf license file, while the
@@ -308,7 +391,18 @@ if(WIN32)
   set(SANITY_WIX_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${SANITY_WIX_LICENSE}" COPYONLY)
   set(CPACK_RESOURCE_FILE_LICENSE "${SANITY_WIX_LICENSE}")
+  if(CPACK_WIX_ROOT)
+    file(TO_CMAKE_PATH "${CPACK_WIX_ROOT}" CPACK_WIX_ROOT)
+  endif()
+  if(CMAKE_VERSION VERSION_LESS 4.3)
+    message(FATAL_ERROR "Windows per-user MSI packaging requires CMake 4.3 or newer")
+  endif()
   set(CPACK_GENERATOR "WIX;ZIP")
+  set(CPACK_PACKAGE_NAME "Podcast Sanity")
+  set(CPACK_WIX_INSTALL_SCOPE "perUser")
+  set(CPACK_PACKAGE_FILE_NAME "podcast-sanity-${PROJECT_VERSION}-win64")
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "Podcast Sanity")
+  set(CPACK_CREATE_DESKTOP_LINKS "podcast-sanity")
 else()
   set(CPACK_GENERATOR "DEB;TGZ")
 endif()

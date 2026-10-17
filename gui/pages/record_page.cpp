@@ -7,6 +7,8 @@
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
 #include <QShortcut>
@@ -23,6 +25,7 @@
 #include "sanity/loudness.hpp"
 #include "theme.h"
 #include "widgets.h"
+#include "studio_widgets.h"
 
 #if SANITY_HAVE_QTMM
 #include <QAudioDevice>
@@ -49,6 +52,30 @@ QString cache_dir() {
 
 QString live_pcm_path() { return cache_dir() + "/recording-live.pcm"; }
 QString live_meta_path() { return cache_dir() + "/recording-live.json"; }
+
+// Reads the crash-safe take with the format recorded next to it. Falls back
+// to 48 kHz mono for takes written before the metadata existed.
+bool read_live_take(sanity::AudioBuffer& b) {
+    int rate = 48000, ch = 1;
+    QFile meta(live_meta_path());
+    if (meta.open(QIODevice::ReadOnly)) {
+        const QJsonObject o = QJsonDocument::fromJson(meta.readAll()).object();
+        rate = o.value("sample_rate").toInt(48000);
+        ch = std::clamp(o.value("channels").toInt(1), 1, 2);
+    }
+    QFile f(live_pcm_path());
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QByteArray pcm = f.readAll();
+    const int frames = pcm.size() / (2 * ch);
+    if (frames <= 0) return false;
+    b.sample_rate = rate;
+    b.channels = ch;
+    b.data.resize(static_cast<std::size_t>(frames) * static_cast<std::size_t>(ch));
+    const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
+    for (int i = 0; i < frames * ch; i++)
+        b.data[static_cast<std::size_t>(i)] = static_cast<float>(p[i] / 32768.0);
+    return true;
+}
 
 }  // namespace
 
@@ -78,24 +105,21 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
         hl->setContentsMargins(0, 0, 0, 0);
         hl->setSpacing(12);
 
-        rec_ = new QPushButton(QStringLiteral("\u25CF  REC"));
-        rec_->setObjectName("Rec");
+        rec_ = new TransportButton(TransportButton::Glyph::Record, QStringLiteral(" REC"));
         connect(rec_, &QPushButton::clicked, this, &RecordPage::start_recording);
         hl->addWidget(rec_);
 
-        pause_ = new QPushButton(QStringLiteral("\u23F8  PAUSA"));
-        pause_->setObjectName("Transport");
+        pause_ = new TransportButton(TransportButton::Glyph::Pause, QStringLiteral(" PAUSA"));
         pause_->setEnabled(false);
         connect(pause_, &QPushButton::clicked, this, &RecordPage::pause_resume);
         hl->addWidget(pause_);
 
-        stop_ = new QPushButton(QStringLiteral("\u23F9  STOP"));
-        stop_->setObjectName("Transport");
+        stop_ = new TransportButton(TransportButton::Glyph::Stop, QStringLiteral(" STOP"));
         stop_->setEnabled(false);
         connect(stop_, &QPushButton::clicked, this, &RecordPage::stop_recording);
         hl->addWidget(stop_);
 
-        marker_ = new QPushButton(QStringLiteral("\u2691  Marker (M)"));
+        marker_ = new TransportButton(TransportButton::Glyph::Marker, QStringLiteral(" Marker (M)"));
         marker_->setEnabled(false);
         marker_->setToolTip(QStringLiteral("Inserisce un marcatore al tempo corrente"));
         connect(marker_, &QPushButton::clicked, this, &RecordPage::add_marker);
@@ -112,21 +136,25 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
         transport_->add_widget(host);
 
         auto* meter_host = new QWidget();
-        auto* meters = new QGridLayout(meter_host);
+        auto* meters = new QHBoxLayout(meter_host);
         meters->setContentsMargins(0, 0, 0, 0);
-        meters->setHorizontalSpacing(10);
-        meters->setVerticalSpacing(6);
-        meters->addWidget(new QLabel(QStringLiteral("Ingresso"), meter_host), 0, 0);
+        meters->setSpacing(14);
+        vu_ = new VuMeter(QStringLiteral("Ingresso  (0 VU = -18 dBFS)"), meter_host);
+        meters->addWidget(vu_, 1);
+        auto* bars = new QVBoxLayout();
+        bars->setSpacing(6);
+        bars->addWidget(new QLabel(QStringLiteral("Picco campione")));
         in_meter_ = new LevelMeter(meter_host);
         in_meter_->set_range(kMeterMin, kMeterMax);
         in_meter_->set_target(-6.0);
-        meters->addWidget(in_meter_, 0, 1);
-        meters->addWidget(new QLabel(QStringLiteral("True peak"), meter_host), 1, 0);
+        bars->addWidget(in_meter_);
+        bars->addWidget(new QLabel(QStringLiteral("True peak (4x)")));
         tp_meter_ = new LevelMeter(meter_host);
         tp_meter_->set_range(kMeterMin, kMeterMax);
         tp_meter_->set_target(-1.0);
-        meters->addWidget(tp_meter_, 1, 1);
-        meters->setColumnStretch(1, 1);
+        bars->addWidget(tp_meter_);
+        bars->addStretch(1);
+        meters->addLayout(bars, 1);
         transport_->add_widget(meter_host);
         transport_->set_state(State::Idle, QStringLiteral("Pronto"));
     }
@@ -134,7 +162,7 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
 
     // ------------------------------------------------------------- devices
     devices_ = new Card(QStringLiteral("Sorgente e dispositivi"),
-                        QStringLiteral("Scegli microfono, monitoraggio e parametri di cattura."));
+                        QStringLiteral("Scegli microfono e parametri di cattura."));
     {
         source_ = new QComboBox();
         source_->addItem(QStringLiteral("Microfono (dispositivo audio)"), QVariant("mic"));
@@ -150,12 +178,8 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
                                                      "sintetico e non richiede hardware.")));
 
         input_dev_ = new QComboBox();
-        monitor_dev_ = new QComboBox();
         devices_->add_widget(make_row(QStringLiteral("Ingresso"), input_dev_,
                                       QStringLiteral("Microfono o interfaccia.")));
-        devices_->add_widget(
-            make_row(QStringLiteral("Monitoraggio"), monitor_dev_,
-                     QStringLiteral("Uscita per l'ascolto in cuffia durante la registrazione.")));
 
         rate_ = new QComboBox();
         rate_->addItem(QStringLiteral("48000 Hz"), 48000);
@@ -182,18 +206,6 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
         ghl->addWidget(gain_label_);
         devices_->add_widget(make_row(QStringLiteral("Guadagno in ingresso"), gain_row));
 
-        anti_hum_ = new QCheckBox(QStringLiteral("Attivo"));
-        anti_hum_->setChecked(true);
-        devices_->add_widget(make_row(QStringLiteral("Filtro anti-ronzio (50/60 Hz)"), anti_hum_,
-                                      QStringLiteral("Notch automatico sull'armonica di rete.")));
-        auto_split_ = new QCheckBox(QStringLiteral("Attivo"));
-        devices_->add_widget(
-            make_row(QStringLiteral("Divisione automatica sui silenzi (VAD)"), auto_split_,
-                     QStringLiteral("Segna i confini dei blocchi di parlato per il montaggio.")));
-        monitor_ = new QCheckBox(QStringLiteral("Attivo"));
-        monitor_->setChecked(false);
-        devices_->add_widget(make_row(QStringLiteral("Ascolto in cuffia"), monitor_));
-
         refresh_devices();
     }
     col->insertWidget(insert_at + 1, devices_);
@@ -216,18 +228,8 @@ RecordPage::RecordPage(QWidget* parent) : QWidget(parent) {
     rhl->addWidget(recovery_, 1);
     auto* rec_btn = new QPushButton(QStringLiteral("Recupera"));
     connect(rec_btn, &QPushButton::clicked, this, [this] {
-        QFile f(live_pcm_path());
-        if (!f.open(QIODevice::ReadOnly)) return;
-        const QByteArray pcm = f.readAll();
-        const int rate = 48000, ch = 1;
         sanity::AudioBuffer b;
-        b.sample_rate = rate;
-        b.channels = ch;
-        const int n = pcm.size() / 2;
-        const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
-        b.data.resize(static_cast<std::size_t>(n));
-        for (int i = 0; i < n; i++) b.data[static_cast<std::size_t>(i)] =
-            static_cast<float>(p[i] / 32768.0);
+        if (!read_live_take(b)) return;
         AppState::get().set_audio(b, QString(), QStringLiteral("recupero"));
         emit recording_ready();
     });
@@ -274,19 +276,12 @@ void RecordPage::refresh_devices() {
     input_dev_->clear();
     for (const QAudioDevice& d : QMediaDevices::audioInputs())
         input_dev_->addItem(d.description(), QString::fromUtf8(d.id()));
-    monitor_dev_->clear();
-    for (const QAudioDevice& d : QMediaDevices::audioOutputs())
-        monitor_dev_->addItem(d.description(), QString::fromUtf8(d.id()));
 #else
     input_dev_->clear();
     input_dev_->addItem(QStringLiteral("non disponibile"));
-    monitor_dev_->clear();
-    monitor_dev_->addItem(QStringLiteral("non disponibile"));
 #endif
     const bool mic = mode == QLatin1String("mic");
     input_dev_->setEnabled(mic);
-    monitor_dev_->setEnabled(mic);
-    anti_hum_->setEnabled(true);
     if (!mic) {
         source_->setToolTip(QStringLiteral("Modalita test: nessun hardware richiesto, "
                                            "elaborazione identica."));
@@ -327,6 +322,8 @@ void RecordPage::start_recording() {
         stop_->setEnabled(false);
         pause_->setEnabled(false);
         marker_->setEnabled(false);
+        rec_->set_lit(false);
+        emit recording_stopped();
     });
 
     const int rate = rate_->currentData().toInt();
@@ -337,6 +334,9 @@ void RecordPage::start_recording() {
         return;
     }
 
+    live_rate_ = capture_->sample_rate();
+    live_channels_ = capture_->channels();
+
     // Crash-safe writer: the header is written first so a truncated file is
     // still interpretable, then raw PCM is appended as it arrives.
     {
@@ -346,17 +346,21 @@ void RecordPage::start_recording() {
                                      "{\n  \"sample_rate\": %1,\n  \"channels\": %2,\n"
                                      "  \"started\": \"%3\",\n  \"format\": \"s16le\",\n"
                                      "  \"pcm\": \"recording-live.pcm\"\n}\n")
-                                     .arg(rate).arg(ch).arg(QDateTime::currentDateTime().toString(Qt::ISODate));
+                                     .arg(live_rate_)
+                                     .arg(live_channels_)
+                                     .arg(QDateTime::currentDateTime().toString(Qt::ISODate));
             meta.write(json.toUtf8());
         }
         QFile::remove(live_pcm_path());
     }
 
     recording_ = true;
+    rec_->set_lit(true);
+    emit recording_started();
     paused_ = false;
     elapsed_ = 0.0;
     last_paint_ = -1.0;
-    sample_rate_of_live_ = rate;
+    sample_rate_of_live_ = live_rate_;
     live_display_.clear();
     marker_times_.clear();
     marker_labels_.clear();
@@ -378,12 +382,14 @@ void RecordPage::pause_resume() {
     if (!paused_) {
         capture_->pause();
         paused_ = true;
-        pause_->setText(QStringLiteral("\u25B6  RIPRENDI"));
+        pause_->setText(QStringLiteral(" RIPRENDI"));
+        pause_->set_glyph(TransportButton::Glyph::Play);
         set_state(State::Warning, QStringLiteral("In pausa"));
     } else {
         capture_->resume();
         paused_ = false;
-        pause_->setText(QStringLiteral("\u23F8  PAUSA"));
+        pause_->setText(QStringLiteral(" PAUSA"));
+        pause_->set_glyph(TransportButton::Glyph::Pause);
         set_state(State::Busy, QStringLiteral("Registrazione"));
     }
 }
@@ -391,40 +397,33 @@ void RecordPage::pause_resume() {
 void RecordPage::stop_recording() {
     if (!recording_) return;
     recording_ = false;
+    rec_->set_lit(false);
+    mic_testing_ = false;
+    emit recording_stopped();
     if (capture_) {
         capture_->stop();
         capture_->deleteLater();
         capture_ = nullptr;
     }
     // Read back the crash-safe file and hand it to the session.
-    QFile f(live_pcm_path());
-    if (f.open(QIODevice::ReadOnly)) {
-        const QByteArray pcm = f.readAll();
-        const int rate = rate_->currentData().toInt();
-        const int ch = channels_->currentData().toInt();
-        const int frames = pcm.size() / (2 * ch);
-        sanity::AudioBuffer b;
-        b.sample_rate = rate;
-        b.channels = ch;
-        b.data.resize(static_cast<std::size_t>(frames) * static_cast<std::size_t>(ch));
-        const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
-        for (int i = 0; i < frames * ch; i++)
-            b.data[static_cast<std::size_t>(i)] = static_cast<float>(p[i] / 32768.0);
-        if (!b.data.empty()) {
-            AppState::get().set_audio(b, QString(), QStringLiteral("microphone"));
-            AppState::get().session().name =
-                QStringLiteral("Registrazione %1")
-                    .arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
-            emit recording_ready();
-        }
+    sanity::AudioBuffer b;
+    if (read_live_take(b)) {
+        AppState::get().set_audio(b, QString(), QStringLiteral("microphone"));
+        AppState::get().session().name =
+            QStringLiteral("Registrazione %1")
+                .arg(QDateTime::currentDateTime().toString("dd/MM HH:mm"));
+        emit recording_ready();
     }
     rec_->setEnabled(true);
     pause_->setEnabled(false);
     stop_->setEnabled(false);
     marker_->setEnabled(false);
-    pause_->setText(QStringLiteral("\u23F8  PAUSA"));
+    pause_->setText(QStringLiteral(" PAUSA"));
+    pause_->set_glyph(TransportButton::Glyph::Pause);
     set_state(State::Ready, QStringLiteral("Take completata"));
     in_meter_->reset();
+    tp_meter_->reset();
+    vu_->reset();
     update_recovery_status();
 }
 
@@ -439,11 +438,14 @@ void RecordPage::add_marker() {
     counter_->setText(QStringLiteral("%1 marcatori").arg(marker_times_.size()));
 }
 
-void RecordPage::on_level(float peak_db, float rms_db, float lufs) {
-    in_meter_->set_value(rms_db);
+void RecordPage::on_level(float peak_db, float rms_db, float lufs, float true_peak_db) {
+    vu_->set_value_dbfs(rms_db);
+    vu_->set_peak_dbfs(peak_db);
+    in_meter_->set_value(peak_db);
     in_meter_->set_peak(peak_db);
-    tp_meter_->set_value(peak_db);
-    tp_meter_->set_true_peak(peak_db);
+    tp_meter_->set_value(true_peak_db);
+    tp_meter_->set_true_peak(true_peak_db);
+    if (mic_testing_) mic_test_floor_db_ = std::min(mic_test_floor_db_, static_cast<double>(rms_db));
     last_mic_test_db_ = peak_db;
     test_result_->setToolTip(QStringLiteral("Picco %1 dBFS, RMS %2 dBFS, %3 LUFS")
                                  .arg(fmt_db(peak_db))
@@ -457,7 +459,7 @@ void RecordPage::on_chunk(const QByteArray& pcm) {
     if (f.open(QIODevice::Append)) f.write(pcm);
 
     // Update the rolling display buffer.
-    const int ch = channels_->currentData().toInt();
+    const int ch = live_channels_;
     const int n = pcm.size() / 2;
     const qint16* p = reinterpret_cast<const qint16*>(pcm.constData());
     live_display_.reserve(live_display_.size() + static_cast<std::size_t>(n / ch + 1));
@@ -500,6 +502,8 @@ void RecordPage::run_mic_test() {
     start_recording();
     if (!recording_) return;
     set_state(State::Busy, QStringLiteral("Test in corso"));
+    mic_test_floor_db_ = 0.0;
+    mic_testing_ = true;
     QTimer::singleShot(3000, this, [this] {
         if (!recording_) return;
         const char* advice = "guadagno adeguato";
@@ -507,10 +511,10 @@ void RecordPage::run_mic_test() {
         else if (last_mic_test_db_ < -24.0) advice = "alza il guadagno di circa 6 dB";
         else if (last_mic_test_db_ > -6.0) advice = "abbassa il guadagno: rischi di saturare";
         test_result_->setText(QStringLiteral("Picco misurato %1 dBFS - %2. Rumore di fondo "
-                                             "stimato %3 dB.")
+                                             "misurato %3 dB.")
                                   .arg(fmt_db(last_mic_test_db_))
                                   .arg(QLatin1String(advice))
-                                  .arg(fmt_db(last_mic_test_db_ - 40.0)));
+                                  .arg(fmt_db(mic_test_floor_db_)));
         stop_recording();
     });
 }

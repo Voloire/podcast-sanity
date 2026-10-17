@@ -13,11 +13,69 @@
 #include <cmath>
 
 #include "theme.h"
+#include "studio_widgets.h"
 
 namespace gui {
 
+TransportButton::TransportButton(Glyph g, const QString& text, QWidget* parent)
+    : QPushButton(text, parent), glyph_(g) {
+    setObjectName(g == Glyph::Record ? "Rec" : "Transport");
+    setMinimumHeight(g == Glyph::Record ? 52 : 40);
+    setCursor(Qt::PointingHandCursor);
+}
+void TransportButton::set_glyph(Glyph g) { glyph_ = g; update(); }
+void TransportButton::set_lit(bool on) { lit_ = on; update(); }
+
+void TransportButton::paintEvent(QPaintEvent* e) {
+    QPushButton::paintEvent(e);
+    const Tokens& t = tokens();
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const double s = std::min(18.0, height() * 0.42);
+    const QRectF g(14.0, height() / 2.0 - s / 2.0, s, s);
+    const QColor ink = glyph_ == Glyph::Record ? QColor("#FFFFFF") :
+                       isEnabled() ? t.text : t.text_faint;
+    p.setPen(Qt::NoPen);
+    p.setBrush(ink);
+    switch (glyph_) {
+        case Glyph::Record:
+            if (lit_) {
+                p.setBrush(QColor(255, 255, 255, 90));
+                p.drawEllipse(g.center(), s * 0.7, s * 0.7);
+            }
+            p.setBrush(ink);
+            p.drawEllipse(g.center(), s * 0.42, s * 0.42);
+            break;
+        case Glyph::Pause:
+            p.drawRoundedRect(QRectF(g.left() + s * 0.15, g.top(), s * 0.26, s), 2, 2);
+            p.drawRoundedRect(QRectF(g.right() - s * 0.41, g.top(), s * 0.26, s), 2, 2);
+            break;
+        case Glyph::Play: {
+            QPolygonF tri;
+            tri << QPointF(g.left() + s * 0.2, g.top()) << QPointF(g.right(), g.center().y())
+                << QPointF(g.left() + s * 0.2, g.bottom());
+            p.drawPolygon(tri);
+            break;
+        }
+        case Glyph::Stop:
+            p.drawRoundedRect(g.adjusted(s * 0.1, s * 0.1, -s * 0.1, -s * 0.1), 2, 2);
+            break;
+        case Glyph::Marker: {
+            p.setPen(QPen(ink, 2));
+            p.drawLine(QPointF(g.left() + 2, g.top()), QPointF(g.left() + 2, g.bottom()));
+            QPolygonF flag;
+            flag << QPointF(g.left() + 2, g.top()) << QPointF(g.right(), g.top() + s * 0.25)
+                 << QPointF(g.left() + 2, g.top() + s * 0.5);
+            p.setPen(Qt::NoPen);
+            p.drawPolygon(flag);
+            break;
+        }
+    }
+}
+
 namespace {
 constexpr int kEnvelopeBuckets = 2400;  // fixed so painting stays cheap
+constexpr double kPi = 3.14159265358979323846;
 }
 
 // --------------------------------------------------------------------- chip
@@ -86,6 +144,8 @@ Card::Card(const QString& title, const QString& subtitle, QWidget* parent)
     hl->addLayout(header_trailing_);
 
     chip_ = new Chip(header);
+    led_ = new LedIndicator(header);
+    hl->addWidget(led_);
     hl->addWidget(chip_);
 
     collapse_ = new QPushButton(QStringLiteral("\u25BE"), header);
@@ -117,7 +177,10 @@ void Card::add_row(QWidget* left, QWidget* right) {
     body_->addWidget(row);
 }
 
-void Card::set_state(State s, const QString& text) { chip_->set_state(s, text); }
+void Card::set_state(State s, const QString& text) {
+    chip_->set_state(s, text);
+    led_->set_state(s);
+}
 
 void Card::set_collapsible(bool on) {
     collapsible_ = on;
@@ -341,55 +404,144 @@ void WaveformView::paintEvent(QPaintEvent*) {
     p.setPen(QPen(t.border, 1));
     p.drawPath(bg);
 
+    // Studio grid: dB lines at -6, -12, -24 and a time ruler.
+    const QRectF plot = r.adjusted(48, 0, -4, -16);
+    const double mid = plot.center().y();
+    const double scale = plot.height() * 0.46;
+    p.setPen(QPen(t.border, 1, Qt::DotLine));
+    for (double db : {-6.0, -12.0, -24.0}) {
+        const double a = std::pow(10.0, db / 20.0) * scale;
+        p.drawLine(QPointF(plot.left(), mid - a), QPointF(plot.right(), mid - a));
+        p.drawLine(QPointF(plot.left(), mid + a), QPointF(plot.right(), mid + a));
+        p.setPen(QPen(t.text_faint, 1));
+        p.drawText(QRectF(r.left() + 4, mid - a - 7, 40, 14), Qt::AlignLeft | Qt::AlignVCenter,
+                   QStringLiteral("%1 dB").arg(db));
+        p.setPen(QPen(t.border, 1, Qt::DotLine));
+    }
+    if (duration_s_ > 0.0) {
+        const double step = duration_s_ > 600 ? 60 : (duration_s_ > 120 ? 30 : (duration_s_ > 30 ? 10 : 5));
+        p.setPen(QPen(t.text_faint, 1));
+        for (double s = 0.0; s <= duration_s_; s += step) {
+            const double x = plot.left() + (s / duration_s_) * plot.width();
+            p.drawLine(QPointF(x, plot.bottom()), QPointF(x, plot.bottom() + 4));
+            const double label_x = std::clamp(x - 24, r.left(), std::max(r.left(), r.right() - 48));
+            p.drawText(QRectF(label_x, plot.bottom() + 3, 48, 13), Qt::AlignHCenter | Qt::AlignTop,
+                       fmt_seconds(s));
+        }
+    }
+
     // Filler / marker overlays first, so the waveform sits on top.
     if (!markers_.isEmpty() && duration_s_ > 0.0) {
         p.setPen(Qt::NoPen);
         QColor overlay = t.accent;
         overlay.setAlpha(70);
         for (const auto& m : markers_) {
-            const double x0 = r.left() + (m.first / duration_s_) * r.width();
-            const double x1 = r.left() + (m.second / duration_s_) * r.width();
-            p.fillRect(QRectF(x0, r.top(), std::max(1.0, x1 - x0), r.height()), overlay);
+            const double x0 = plot.left() + (m.first / duration_s_) * plot.width();
+            const double x1 = plot.left() + (m.second / duration_s_) * plot.width();
+            p.fillRect(QRectF(x0, plot.top(), std::max(1.0, x1 - x0), plot.height()), overlay);
         }
     }
 
     if (buckets_ > 0 && !mono_.empty()) {
-        const double mid = r.center().y();
-        const double scale = r.height() * 0.46;
         p.setPen(QPen(t.border, 1));
-        p.drawLine(QPointF(r.left(), mid), QPointF(r.right(), mid));
-        p.setPen(QPen(t.accent, 1));
-        for (int b = 0; b < buckets_; b++) {
-            const double x = r.left() + (static_cast<double>(b) + 0.5) / buckets_ * r.width();
-            const double y0 = mid - env_max_[b] * scale;
-            const double y1 = mid - env_min_[b] * scale;
-            p.drawLine(QPointF(x, y0), QPointF(x, std::max(y1, y0 + 0.6)));
+        p.drawLine(QPointF(plot.left(), mid), QPointF(plot.right(), mid));
+        for (int pass = 0; pass < 2; pass++) {
+            p.setPen(QPen(pass == 0 ? t.accent_soft : t.accent, 1));
+            const double amplitude = scale * (pass == 0 ? 1.15 : 1.0);
+            for (int b = 0; b < buckets_; b++) {
+                const double x = plot.left() + (static_cast<double>(b) + 0.5) / buckets_ * plot.width();
+                const double y0 = mid - env_max_[b] * amplitude;
+                const double y1 = mid - env_min_[b] * amplitude;
+                p.drawLine(QPointF(x, y0), QPointF(x, std::max(y1, y0 + 0.6)));
+            }
         }
     } else {
         p.setPen(t.text_faint);
-        p.drawText(r, Qt::AlignCenter, QStringLiteral("Nessun audio caricato"));
+        p.drawText(plot, Qt::AlignCenter, QStringLiteral("Nessun audio caricato"));
     }
 
     if (show_playhead_ && playhead_ >= 0.0 && duration_s_ > 0.0) {
-        const double x = r.left() + (playhead_ / duration_s_) * r.width();
+        const double x = plot.left() + (playhead_ / duration_s_) * plot.width();
         p.setPen(QPen(t.text, 1));
-        p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
     }
 
     if (!marker_label_.isEmpty() && !markers_.isEmpty()) {
         p.setPen(t.text_dim);
-        p.drawText(r.adjusted(8, 6, -8, 0), Qt::AlignTop | Qt::AlignLeft, marker_label_);
+        p.drawText(plot.adjusted(8, 6, -8, 0), Qt::AlignTop | Qt::AlignLeft, marker_label_);
     }
 }
 
 // -------------------------------------------------------------- nav button
-NavButton::NavButton(const QString& glyph, const QString& text, QWidget* parent)
-    : QPushButton(parent) {
+NavButton::NavButton(NavIcon icon, const QString& text, QWidget* parent)
+    : QPushButton(parent), icon_(icon) {
     setObjectName("Nav");
     setCheckable(true);
     setCursor(Qt::PointingHandCursor);
-    setText(QStringLiteral("  %1   %2").arg(glyph, text));
-    setMinimumHeight(36);
+    setText(text);
+    setMinimumHeight(38);
+}
+
+void NavButton::paintEvent(QPaintEvent* e) {
+    QPushButton::paintEvent(e);
+    const Tokens& t = tokens();
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const QColor ink = isChecked() ? t.accent : t.text_dim;
+    p.setPen(QPen(ink, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    const QRectF b(14, height() / 2.0 - 9, 18, 18);
+    switch (icon_) {
+        case NavIcon::Mic:
+            p.drawRoundedRect(QRectF(b.center().x() - 3.5, b.top(), 7, 11), 3.5, 3.5);
+            p.drawArc(QRectF(b.center().x() - 6.5, b.top() + 4, 13, 11), 180 * 16, 180 * 16);
+            p.drawLine(QPointF(b.center().x(), b.top() + 15), QPointF(b.center().x(), b.bottom()));
+            break;
+        case NavIcon::Sliders:
+            for (int i = 0; i < 3; i++) {
+                const double y = b.top() + 3 + i * 6;
+                p.drawLine(QPointF(b.left(), y), QPointF(b.right(), y));
+                const double x = b.left() + (i == 1 ? 12 : (i == 0 ? 5 : 9));
+                p.setBrush(ink);
+                p.drawEllipse(QPointF(x, y), 2.2, 2.2);
+                p.setBrush(Qt::NoBrush);
+            }
+            break;
+        case NavIcon::Gauge:
+            p.drawArc(b.adjusted(1, 3, -1, 1), 20 * 16, 140 * 16);
+            p.drawLine(b.center() + QPointF(0, 2), b.center() + QPointF(5, -4));
+            p.setBrush(ink);
+            p.drawEllipse(b.center() + QPointF(0, 2), 1.6, 1.6);
+            break;
+        case NavIcon::Library:
+            p.drawRoundedRect(QRectF(b.left() + 1, b.top() + 2, 4, 14), 1, 1);
+            p.drawRoundedRect(QRectF(b.left() + 7, b.top() + 2, 4, 14), 1, 1);
+            p.drawLine(QPointF(b.left() + 13, b.top() + 3), QPointF(b.right(), b.bottom() - 1));
+            break;
+        case NavIcon::Upload:
+            p.drawLine(QPointF(b.center().x(), b.top() + 1), QPointF(b.center().x(), b.bottom() - 5));
+            p.drawPolyline(QPolygonF() << QPointF(b.center().x() - 5, b.top() + 6) << QPointF(b.center().x(), b.top() + 1)
+                                       << QPointF(b.center().x() + 5, b.top() + 6));
+            p.drawPolyline(QPolygonF() << QPointF(b.left(), b.bottom() - 5) << QPointF(b.left(), b.bottom())
+                                       << QPointF(b.right(), b.bottom()) << QPointF(b.right(), b.bottom() - 5));
+            break;
+        case NavIcon::Gear:
+            for (int i = 0; i < 8; i++) {
+                const double a = i * kPi / 4.0;
+                p.drawLine(b.center() + QPointF(6 * std::cos(a), 6 * std::sin(a)),
+                           b.center() + QPointF(8.5 * std::cos(a), 8.5 * std::sin(a)));
+            }
+            p.drawEllipse(b.center(), 5.5, 5.5);
+            p.drawEllipse(b.center(), 2.0, 2.0);
+            break;
+        case NavIcon::Stethoscope:
+            p.drawArc(QRectF(b.left() + 1, b.top() + 1, 10, 12), 180 * 16, 180 * 16);
+            p.drawLine(QPointF(b.left() + 1, b.top() + 1), QPointF(b.left() + 1, b.top() + 7));
+            p.drawLine(QPointF(b.left() + 11, b.top() + 1), QPointF(b.left() + 11, b.top() + 7));
+            p.drawLine(QPointF(b.left() + 6, b.top() + 13), QPointF(b.left() + 6, b.bottom() - 2));
+            p.drawEllipse(QPointF(b.right() - 2, b.bottom() - 2), 2.2, 2.2);
+            break;
+    }
 }
 
 // ------------------------------------------------------------- misc helpers

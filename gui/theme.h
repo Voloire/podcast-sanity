@@ -6,7 +6,7 @@
 
 namespace gui {
 
-enum class ThemeMode { Light, Dark };
+enum class ThemeMode { Light, Dark, Studio };
 
 struct Tokens {
     QColor bg;          // window background (cream / charcoal)
@@ -27,6 +27,7 @@ struct Tokens {
     QColor meter_low;
     QColor meter_mid;
     QColor meter_high;
+    QColor panel_hi, panel_lo, vu_face, vu_needle, led_off, rec, glow;
 };
 
 const Tokens& tokens();
@@ -36,5 +37,6 @@ ThemeMode mode();
 QString style_sheet();
 // Monospaced family used for numbers, logs and the quality report.
 QString mono_family();
+QString ui_family();
 
 }  // namespace gui
