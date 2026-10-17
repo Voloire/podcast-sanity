@@ -491,6 +491,26 @@ TT_CASE("e2e: a music bed keeps the delivery conformant and the filler cut intac
     CHECK(out2.data == out.data);
 }
 
+TT_CASE("e2e: the corpus generator stays inside its buffers") {
+    // Short recordings used to place a hesitation past the end of the buffer:
+    // the pause before it is random, so only some durations overflowed.
+    for (const std::string profile : {"studio", "home", "rough"}) {
+        for (double seconds : {2.0, 4.0, 5.0, 6.0}) {
+            const CorpusItem item = make_item(profile, seconds);
+            const std::size_t total = item.degraded.size();
+            CHECK(total > 0);
+            for (const Span& f : item.fillers) {
+                CHECK(f.start < f.end);
+                CHECK(f.end <= total);
+            }
+            for (const Span& w : item.words) {
+                CHECK(w.start < w.end);
+                CHECK(w.end <= total);
+            }
+        }
+    }
+}
+
 // The harness itself is a quality gate: scenarios must have run and the report
 // must be machine readable even when checks failed.
 TT_CASE("e2e: harness produced a report for every scenario") {

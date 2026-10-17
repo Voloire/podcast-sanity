@@ -345,9 +345,9 @@ void WaveformView::set_samples(const std::vector<float>& mono, int sample_rate) 
     update();
 }
 
-void WaveformView::append_samples(const float* data, std::size_t n, int sample_rate) {
+void WaveformView::append_samples(const float* samples, std::size_t n, int sample_rate) {
     if (sample_rate > 0) sample_rate_ = sample_rate;
-    mono_.insert(mono_.end(), data, data + n);
+    mono_.insert(mono_.end(), samples, samples + n);
     duration_s_ = static_cast<double>(mono_.size()) / sample_rate_;
     rebuild();
     update();

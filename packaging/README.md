@@ -37,82 +37,45 @@ sudo apt remove podcast-sanity
 
 ## Windows — MSI
 
-Native x64 C++/Qt application. No Docker, WSL, Python or Qt SDK is needed on the
-target machine. The MSI installs for the current user into
-`%LOCALAPPDATA%\Podcast Sanity`, with Start menu and desktop shortcuts, and an
-entry in Windows **Settings → Apps → Installed apps**. No administrator account
-is required. A ZIP containing the same runtime is also produced.
+The MSI is built on Windows; the toolchain cannot cross-build it from Linux.
+vcpkg supplies LAME and libsndfile, and the CMake deploy step pulls in the Qt
+runtime, so the resulting package is self-contained.
+
+```powershell
+# once, in the vcpkg checkout
+vcpkg install mp3lame libsndfile --triplet x64-windows
+
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON -DSANITY_WITH_EBUR128=OFF `
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+      -DVCPKG_TARGET_TRIPLET=x64-windows
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+cd build; cpack -C Release
+# -> podcast-sanity-<version>-win64.msi
+# -> podcast-sanity-<version>-win64.zip   (same tree, no installer)
+```
 
 Build prerequisites:
 
-* Visual Studio Build Tools 2019 or 2022, C++ workload and Windows SDK;
-* CMake **4.3+** (per-user MSI support), Qt 6.5+ Widgets and Multimedia for MSVC x64;
-* WiX **3.14** (`candle.exe` and `light.exe`);
-* vcpkg packages `mp3lame:x64-windows` and `libsndfile:x64-windows`.
+* `CMAKE_TOOLCHAIN_FILE` must be a `-D` cache variable. Putting it in the
+  environment does nothing, and the build then silently loses both codecs.
+* `CPACK_WIX_UPGRADE_GUID` is fixed, so a newer MSI **upgrades** the existing
+  install instead of stacking beside it. Never change it after the first public
+  release.
+* The MSI installs to `Program Files\podcast-sanity` and creates a Start Menu
+  entry plus an uninstaller. The WiX Toolset must be on `PATH`.
+* `data/podcast-sanity.ico` is used for the Add/Remove Programs entry. The
+  optional `data/wix-banner.bmp`, `data/wix-dialog.bmp` and
+  `packaging/wix_patch.xml` are referenced only when present.
+* The Qt runtime is deployed by `qt_generate_deploy_app_script`, so no manual
+  `windeployqt` step is needed. The codec DLLs and their transitive
+  dependencies are collected from vcpkg's `bin` directory at install time.
+* `CPack`'s WiX generator accepts only a `.txt` or `.rtf` licence file, so the
+  Windows branch points it at a text copy of `LICENSE` made at configure time.
 
-Build, test and package from PowerShell:
-
-```powershell
-.\packaging\build-windows.ps1
-# Defaults match the Windows development machine: MSVC 2019 and deps under $HOME.
-# Override paths / generator on other machines:
-.\packaging\build-windows.ps1 -QtRoot C:\Qt\6.8.1\msvc2022_64 `
-  -VcpkgRoot C:\vcpkg -WixRoot C:\tools\wix `
-  -Generator 'Visual Studio 17 2022'
-```
-
-Artifacts: `build-windows\packages\podcast-sanity-0.2.0-win64.msi` and `.zip`.
-The release script requires all codecs and stops on a failed build or test.
-`windeployqt` runs on both build output and the CPack install tree. The package
-includes the Windows platform/audio plugins, codecs, transitive DLLs, Visual C++
-runtime, and license notices. Merely deploying DLLs into a build folder is not
-sufficient to package them; `deploy-windows.cmake.in` handles the install tree.
-
-Verify the **installed MSI**, with SDK/Qt directories removed from the process
-environment (this leaves the application installed):
-
-```powershell
-.\packaging\test-windows-msi.ps1 `
-  -Msi .\build-windows\packages\podcast-sanity-0.2.0-win64.msi
-```
-
-This checks installation, CLI startup, all seven GUI pages, mastering and MP3
-export. Logs and screenshots are in `build-windows\installer-test`. Microphone
-enumeration can be checked with `podcast-sanity.exe --list-audio-devices`; the
-selftest uses synthetic audio and does not record the microphone.
-
-Keep `CPACK_WIX_UPGRADE_GUID` stable for future upgrades. The current build is
-unsigned. `data/podcast-sanity.ico` is checked in; `generate-icon.py` is only an
-optional artwork regeneration tool.
-
-The Studio-branded installer offers a checked **Launch Podcast Sanity** option
-on the finish page. The payload excludes the software OpenGL renderer and TLS,
-network-information, generic and QML-tooling plugins. Qt Network remains a
-Multimedia dependency; no network service is used by the application.
-
-For upgrade and uninstall verification, preserve the original 0.1.0 installer:
-
-```powershell
-.\packaging\test-windows-msi.ps1 `
-  -Msi .\build-windows\packages\podcast-sanity-0.2.0-win64.msi `
-  -PreviousMsi .\build-windows\packages-0.1.0\podcast-sanity-0.1.0-win64.msi -Uninstall
-```
-
-Start without an installed newer version when using `-PreviousMsi`. The test
-checks one Apps & features entry at 0.2.0 and one current-user MSI registration,
-then checks runtime removal when `-Uninstall` is supplied. Windows may expose
-the uninstall entry under HKLM even with the user product registered in HKCU;
-the test checks both uninstall roots.
-
-Signing requires an owner-provided certificate in the Windows certificate store:
-`build-windows.ps1 -SignThumbprint <certificate-thumbprint>` signs both executables
-before packaging and the MSI afterwards. `-TimestampUrl` overrides the default
-RFC 3161 timestamp service. Without a thumbprint the build stays unsigned; signing
-and timestamping were not exercised in the offline release verification.
-
-Accepted WiX ICE warnings: ICE61 allows same-version reinstalls, ICE69 reflects
-CPack's shortcut component layout, and ICE90/ICE91 reflect per-user directories.
-Other validation diagnostics remain enabled.
+`.github/workflows/ci.yml` runs exactly this on a `windows-2022` runner and
+publishes both artifacts, which is the supported way to produce a release.
 
 ## Codec availability
 
@@ -122,16 +85,8 @@ is checked at runtime with `sf_format_check`. The export page hides any
 format whose encoder is missing, so a package that ships without LAME simply
 offers WAV and FLAC instead of failing at the last click.
 
-## 0.2.0 verification status
-
-Windows build, 11/11 CTest tests, original 0.1.0 upgrade, installed self-test and
-uninstall passed. Before/after Task 6.1 payload trimming, the MSI measured
-30,931,917 / 22,906,399 bytes (8,025,518 bytes saved). Later artwork changes alter
-the final MSI size slightly. The original 0.1.0 MSI is preserved separately.
-
-Interactive installer appearance and Finish launch, microphone/preview controls
-and subjective listening still need owner verification. Signing was not run
-without a certificate.
+Because that degradation is silent, the Windows CI job exports one MP3 and one
+FLAC before packaging and fails if either file is missing.
 
 ## Debian verification (0.2.0)
 

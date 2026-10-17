@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <random>
@@ -271,6 +272,20 @@ TT_CASE("wav 24 bit is written as 24 bit even without libsndfile") {
 }
 
 namespace {
+
+// Scratch path for the few tests that touch the filesystem. Windows has no
+// /tmp, so the directory is resolved at run time instead of hardcoded.
+std::string tmp_path(const char* name) {
+#ifdef _WIN32
+    const char* dir = std::getenv("TEMP");
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
+    if (!base.empty() && base.back() != '\\' && base.back() != '/') base += '\\';
+#else
+    std::string base = "/tmp/";
+#endif
+    return base + name;
+}
 
 std::vector<float> sine(double freq, double amp, double seconds, int fs) {
     const std::size_t n = static_cast<std::size_t>(seconds * fs);
@@ -594,7 +609,7 @@ TT_CASE("wav round trip is bit exact for float32") {
     std::uniform_real_distribution<float> d(-0.9f, 0.9f);
     for (auto& v : b.data) v = d(rng);
     std::string err;
-    const std::string path = (std::filesystem::temp_directory_path() / "sanity_rt.wav").string();
+    const std::string path = tmp_path("sanity_rt.wav");
     CHECK(wav_write(path, b, true, &err));
     AudioBuffer c;
     CHECK(wav_read(path, c, err));
@@ -602,8 +617,7 @@ TT_CASE("wav round trip is bit exact for float32") {
     CHECK(c.channels == 2);
     CHECK(c.frames() == b.frames());
     CHECK(c.data == b.data);
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
+    std::remove(path.c_str());
 }
 
 TT_CASE("wav round trip works for 16 bit") {
@@ -611,7 +625,7 @@ TT_CASE("wav round trip works for 16 bit") {
     for (std::size_t i = 0; i < b.data.size(); i++)
         b.data[i] = static_cast<float>(std::sin(i * 0.1) * 0.5);
     std::string err;
-    const std::string path = (std::filesystem::temp_directory_path() / "sanity_rt16.wav").string();
+    const std::string path = tmp_path("sanity_rt16.wav");
     CHECK(wav_write(path, b, false, &err));
     AudioBuffer c;
     CHECK(wav_read(path, c, err));
@@ -620,8 +634,7 @@ TT_CASE("wav round trip works for 16 bit") {
     for (std::size_t i = 0; i < c.data.size(); i++)
         err_max = std::max(err_max, std::fabs(static_cast<double>(c.data[i] - b.data[i])));
     CHECK_LE(err_max, 1.0 / 32767.0 + 1e-6);
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
+    std::remove(path.c_str());
 }
 
 // ------------------------------------------------------------------ segments

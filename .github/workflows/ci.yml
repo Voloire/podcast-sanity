@@ -75,7 +75,7 @@ jobs:
           ctest --test-dir build --output-on-failure -R "^(unit|e2e)$"
 
   windows:
-    name: Windows (build, test, MSI)
+    name: Windows (build, test, MSI + portable ZIP)
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -90,16 +90,17 @@ jobs:
       - name: Install WiX and codec libraries
         run: |
           choco install wixtoolset --no-progress -y
+          echo "WIX=$env:WIX" >> $env:GITHUB_ENV
           python -m pip install 'cmake>=4.3'
           python -c "import cmake; print(cmake.CMAKE_BIN_DIR)" >> $env:GITHUB_PATH
           vcpkg install mp3lame libsndfile --triplet x64-windows
 
       - name: Configure
-        run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows -DSANITY_REQUIRE_CODECS=ON `
-            -DSANITY_WITH_GUI=ON -DSANITY_WITH_EBUR128=OFF
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON -DSANITY_WITH_EBUR128=OFF `
+              -DSANITY_REQUIRE_CODECS=ON `
+              -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+              -DVCPKG_TARGET_TRIPLET=x64-windows
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -107,8 +108,20 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Package MSI
-        run: cd build && cpack -G WIX -C Release
+      # The codec libraries are optional by design, so a missing one degrades
+      # the build silently. Fail loudly instead of shipping an installer whose
+      # MP3 export button does nothing.
+      - name: Smoke test the codecs
+        run: |
+          build\Release\podcast-sanity-render.exe --gen-corpus smoke.wav --profile home --seconds 5 --quiet
+          build\Release\podcast-sanity-render.exe smoke.wav --out smoke.mp3 --summary
+          build\Release\podcast-sanity-render.exe smoke.wav --out smoke.flac --summary
+          if (-not (Test-Path smoke.mp3)) { throw "MP3 export is missing from this build" }
+          if (-not (Test-Path smoke.flac)) { throw "FLAC export is missing from this build" }
+          Get-Item smoke.mp3, smoke.flac | Select-Object Name, Length
+
+      - name: Package MSI and portable ZIP
+        run: cd build && cpack -C Release
 
       - name: Install MSI and test isolated payload
         shell: pwsh
@@ -116,5 +129,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: podcast-sanity-msi
-          path: build/*.msi
+          name: podcast-sanity-windows
+          path: |
+            build/*.msi
+            build/*.zip

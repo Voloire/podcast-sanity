@@ -12,6 +12,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8)
+  # MSVC warns about the standard C functions it considers unsafe. They are
+  # used deliberately and the code does not rely on the *_s variants.
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -52,34 +55,63 @@ if(SANITY_SANITIZE)
 endif()
 
 # ---- codec adapters (optional, detected) ----------------------------------
+# Two discovery paths, because the same two libraries are packaged very
+# differently on Linux (pkg-config) and on Windows (vcpkg, no pkg-config).
 find_package(PkgConfig QUIET)
 set(SANITY_HAVE_MP3 FALSE)
 set(SANITY_HAVE_SNDFILE FALSE)
-find_package(mp3lame CONFIG QUIET)
-find_package(SndFile CONFIG QUIET)
-if(TARGET mp3lame::mp3lame)
-  target_link_libraries(sanity_core PUBLIC mp3lame::mp3lame)
-  set(SANITY_HAVE_MP3 TRUE)
-endif()
-if(TARGET SndFile::sndfile)
-  target_link_libraries(sanity_core PUBLIC SndFile::sndfile)
-  set(SANITY_HAVE_SNDFILE TRUE)
-endif()
-if(PkgConfig_FOUND)
+
+# pkg-config reports bare "-lsndfile" style names, which MSVC cannot resolve,
+# so it is only trusted on toolchains that understand them.
+if(PkgConfig_FOUND AND NOT MSVC)
   pkg_check_modules(MP3LAME QUIET lame)
   pkg_check_modules(SNDFILE QUIET sndfile)
   if(MP3LAME_FOUND AND NOT SANITY_HAVE_MP3)
     set(SANITY_HAVE_MP3 TRUE)
+    set(MP3LAME_LIBRARY "${MP3LAME_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIRS})
   endif()
   if(SNDFILE_FOUND AND NOT SANITY_HAVE_SNDFILE)
     set(SANITY_HAVE_SNDFILE TRUE)
+    set(SNDFILE_LIBRARY "${SNDFILE_LIBRARIES}")
     target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARIES})
     target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIRS})
   endif()
 endif()
-message(STATUS "Codecs: MP3=${SANITY_HAVE_MP3}, FLAC/Ogg=${SANITY_HAVE_SNDFILE}")
+
+# Fallback: find_path/find_library. This is the only path on MSVC + vcpkg,
+# which installs lame/lame.h and sndfile.h but no pkg-config metadata.
+if(NOT SANITY_HAVE_MP3)
+  find_path(MP3LAME_INCLUDE_DIR NAMES lame/lame.h)
+  find_library(MP3LAME_LIBRARY NAMES mp3lame lame libmp3lame)
+  if(MP3LAME_INCLUDE_DIR AND MP3LAME_LIBRARY)
+    set(SANITY_HAVE_MP3 TRUE)
+    target_link_libraries(sanity_core PUBLIC ${MP3LAME_LIBRARY})
+    target_include_directories(sanity_core PUBLIC ${MP3LAME_INCLUDE_DIR})
+  endif()
+endif()
+if(NOT SANITY_HAVE_SNDFILE)
+  find_path(SNDFILE_INCLUDE_DIR NAMES sndfile.h)
+  find_library(SNDFILE_LIBRARY NAMES sndfile libsndfile)
+  if(SNDFILE_INCLUDE_DIR AND SNDFILE_LIBRARY)
+    set(SANITY_HAVE_SNDFILE TRUE)
+    target_link_libraries(sanity_core PUBLIC ${SNDFILE_LIBRARY})
+    target_include_directories(sanity_core PUBLIC ${SNDFILE_INCLUDE_DIR})
+  endif()
+endif()
+
+if(SANITY_HAVE_MP3)
+  message(STATUS "MP3 export enabled (lame at ${MP3LAME_LIBRARY})")
+else()
+  message(STATUS "MP3 export disabled: lame not found")
+endif()
+if(SANITY_HAVE_SNDFILE)
+  message(STATUS "FLAC/Ogg export enabled (libsndfile at ${SNDFILE_LIBRARY})")
+else()
+  message(STATUS "FLAC/Ogg export disabled: libsndfile not found")
+endif()
+
 if(SANITY_REQUIRE_CODECS AND (NOT SANITY_HAVE_MP3 OR NOT SANITY_HAVE_SNDFILE))
   message(FATAL_ERROR "Release package requires LAME and libsndfile")
 endif()
@@ -209,6 +241,17 @@ if(SANITY_WITH_GUI)
     endif()
     message(STATUS "Qt6 found: building podcast-sanity GUI")
 
+    # Deploy the Qt runtime next to the executable so the packaged tree is
+    # self-contained. Without this the MSI/ZIP would ship an .exe that cannot
+    # start, because CPack only knows about the targets we install by hand.
+    if(WIN32)
+      qt_generate_deploy_app_script(
+        TARGET podcast-sanity
+        OUTPUT_SCRIPT qt_deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR)
+      install(SCRIPT ${qt_deploy_script})
+    endif()
+
     # Automated interface test: walks every page, runs the chain and exports an
     # MP3. Runs under a virtual display in CI.
     find_program(XVFB_RUN xvfb-run)
@@ -253,22 +296,12 @@ if(NOT WIN32)
 endif()
 if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-  if(WIN32)
-    find_program(SANITY_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
-    # Deploy into the install tree: copying DLLs beside build outputs alone does
-    # not include them in an MSI. The same payload is used by MSI and ZIP.
-    configure_file(packaging/deploy-windows.cmake.in deploy-windows.cmake @ONLY)
-    install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/deploy-windows.cmake")
-    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    include(InstallRequiredSystemLibraries)
-    install(FILES LICENSE packaging/THIRD-PARTY.md DESTINATION licenses)
-    if(VCPKG_INSTALLED_DIR)
-      foreach(codec mp3lame libsndfile libflac libogg libvorbis mpg123 opus)
-        install(FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${codec}/copyright"
-          DESTINATION "licenses/${codec}")
-      endforeach()
-    endif()
-  else()
+endif()
+
+# Desktop integration is a freedesktop concept. Installing it on Windows would
+# drop .desktop files and AppStream metadata into the MSI, which nothing there
+# can read.
+if(UNIX)
   install(FILES data/podcast-sanity.desktop
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES data/io.github.voloire.podcast-sanity.metainfo.xml
@@ -276,6 +309,28 @@ if(TARGET podcast-sanity)
   install(FILES data/podcast-sanity.svg
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
            RENAME podcast-sanity.svg)
+endif()
+
+# The codec libraries come from vcpkg as DLLs on Windows, so the package must
+# carry their runtime. They are collected wholesale rather than one by one
+# because libsndfile pulls in a dozen transitive dependencies of its own.
+if(WIN32)
+  set(SANITY_VCPKG_BIN "")
+  if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+    set(SANITY_VCPKG_BIN "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+  elseif(DEFINED ENV{VCPKG_INSTALLATION_ROOT} AND VCPKG_TARGET_TRIPLET)
+    set(SANITY_VCPKG_BIN "$ENV{VCPKG_INSTALLATION_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin")
+  endif()
+  if(SANITY_VCPKG_BIN AND EXISTS "${SANITY_VCPKG_BIN}")
+    file(GLOB SANITY_CODEC_RUNTIME "${SANITY_VCPKG_BIN}/*.dll")
+    # vcpkg also drops the tools it used to build the libraries in there; they
+    # are not part of the application's runtime.
+    list(FILTER SANITY_CODEC_RUNTIME EXCLUDE REGEX "[^/\\\\]*(yasm|pkgconf)[^/\\\\]*\\.dll$")
+    list(LENGTH SANITY_CODEC_RUNTIME SANITY_CODEC_RUNTIME_COUNT)
+    if(SANITY_CODEC_RUNTIME_COUNT GREATER 0)
+      install(FILES ${SANITY_CODEC_RUNTIME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+      message(STATUS "Shipping ${SANITY_CODEC_RUNTIME_COUNT} codec DLL(s) from ${SANITY_VCPKG_BIN}")
+    endif()
   endif()
 endif()
 
@@ -288,6 +343,9 @@ set(CPACK_PACKAGE_CONTACT "Voloire")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Voloire/podcast-sanity")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
+# Without this the WiX default is "<name> <version>", which puts every release
+# in its own "podcast-sanity 0.1.0" folder under Program Files.
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "podcast-sanity")
 
 # --- Debian / Ubuntu -------------------------------------------------------
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Voloire")
@@ -313,6 +371,7 @@ set(CPACK_WIX_LIGHT_EXTRA_FLAGS "-sice:ICE61" "-sice:ICE69" "-sice:ICE90" "-sice
 # still builds on a bare checkout.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
   set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
+  set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/podcast-sanity.ico")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")
   set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/data/wix-banner.bmp")
@@ -326,8 +385,12 @@ set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Podcast Sani
 set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOX "1")
 
 if(WIN32)
-  configure_file(LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt" COPYONLY)
-  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
+  # CPack's WiX generator accepts only a .txt or .rtf license file, while the
+  # project ships a plain extensionless LICENSE. Hand it a text copy instead of
+  # keeping a second, drifting copy in the repository.
+  set(SANITY_WIX_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${SANITY_WIX_LICENSE}" COPYONLY)
+  set(CPACK_RESOURCE_FILE_LICENSE "${SANITY_WIX_LICENSE}")
   if(CPACK_WIX_ROOT)
     file(TO_CMAKE_PATH "${CPACK_WIX_ROOT}" CPACK_WIX_ROOT)
   endif()
