@@ -12,10 +12,10 @@ cd build && ctest --output-on-failure
 | `unit` | `sanity_tests` | 36 cases / 1342 checks without libebur128 (39 / 1353 with it) | ~33 s | DSP, codecs, reports and music bed |
 | `cli_missing_value`, `cli_help`, `cli_list_profiles` | renderer | argument/profile checks | <1 s | CLI contract |
 | `cli_music_bed` | PowerShell + renderer | generation, mix, report and tail | ~0.7 s | CLI bed switches (Windows) |
-| `e2e` | `sanity_e2e_tests` | 12 cases / 66 checks | ~9 s | Whole chain against ground truth |
-| `e2e_30s` | `sanity_e2e_tests --seconds 30` | 12 cases / 66 checks | ~23 s | Speech and filler margins |
-| `e2e_45s` | `sanity_e2e_tests --seconds 45` | 12 cases / 66 checks | ~36 s | SNR margin |
-| `e2e_44k` | `sanity_e2e_tests --rate 44100` | 12 cases / 63 checks | ~9 s | Alternate-rate corpus |
+| `e2e` | `sanity_e2e_tests` | 13 cases / 222 checks | ~9 s | Whole chain against ground truth |
+| `e2e_30s` | `sanity_e2e_tests --seconds 30` | 13 cases / 222 checks | ~23 s | Speech and filler margins |
+| `e2e_45s` | `sanity_e2e_tests --seconds 45` | 13 cases / 222 checks | ~36 s | SNR margin |
+| `e2e_44k` | `sanity_e2e_tests --rate 44100` | 13 cases / 213 checks | ~9 s | Alternate-rate corpus |
 | `gui` | `podcast-sanity --selftest` | 7 pages + bed + master + MP3 | ~4 s | Interface wiring |
 | `gui_shots` | self-test with screenshots | Studio, Light and Dark captures | ~9 s | Windows visual evidence |
 
