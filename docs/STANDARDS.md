@@ -20,9 +20,13 @@ defaults are, and where the numbers come from.
   and applies the −0.691 dB offset exactly once, to the summed channel energies.
 * Momentary loudness is the 400 ms window value; short term is 3 s.
 * Loudness range (LRA) follows EBU Tech 3342.
-* Multi-channel material is folded to mono, so the reported integrated loudness
-  is that of the mono sum — the same signal the chain processes. See the
-  limitation in `DESIGN-podcast-sanity.md` §7.
+* Channel energy is summed across channels before gating, per BS.1770: the
+  `AudioBuffer` overloads of `measure_loudness()`, `integrated_lufs()`,
+  `loudness_range()` and `true_peak_db()` are what the autonomous path and the
+  delivery checks use. Folding L+R first would understate anti-phase material and
+  hide a channel imbalance. The legacy `master()` chain still processes a mono
+  sum and therefore reports the loudness of that sum; see §7 of
+  `DESIGN-podcast-sanity.md`.
 
 **True peak** is measured with 4× oversampling and a polyphase FIR, evaluated
 only near candidate peaks (a pruned scan). The unit tests pin the detector with
@@ -35,22 +39,23 @@ that `ebur128_true_peak` returns a *linear* value (1.0 = 0 dBTP).
 
 ## 2. Delivery targets
 
-The defaults follow the **Apple Podcasts Authoring Practices**, which is what
-most podcast tooling in practice meets.
+Two named profiles exist. They are delivery choices, not measurement standards:
+BS.1770 defines how to measure loudness and true peak, not what a podcast should
+target.
 
-| Parameter | Mono (spoken word) | Stereo (music / mixed) |
-|-----------|--------------------|------------------------|
-| Integrated loudness | **−19 LUFS** | **−16 LUFS** |
-| True peak ceiling | **−1.0 dBTP** | **−1.0 dBTP** |
-| Tolerance | ±1 LU | ±1 LU |
+| Profile | Integrated loudness | True peak | Used by |
+|---------|--------------------|-----------|---------|
+| `podcast` | **−16 LUFS** ±1 LU, mono or stereo | **≤ −1.0 dBTP** | The `podcast-master` skill, the default for new work |
+| `speech-mono` | **−19 LUFS** ±1 LU | **≤ −1.0 dBTP** | Explicit choice, and the legacy CLI/GUI default for mono |
 
-`Params::target_lufs = 0` is the sentinel for "automatic": the engine picks
-−19 for a mono output and −16 for stereo. Every other standard is expressible by
-setting the target explicitly. The GUI exposes these presets:
+−16 LUFS with a −1 dBTP ceiling is the current Apple Podcasts guidance for
+spoken-word delivery, mono included; the older −19 mono convention is kept only
+as `speech-mono` and is not described as a current vendor requirement. The GUI
+presets remain as before and map onto these numbers:
 
 | Preset | Loudness | True peak | Note |
 |--------|----------|-----------|------|
-| Apple Podcasts, mono voice | −19 LUFS | −1.0 dBTP | Default for `Preset::Talk` |
+| Apple Podcasts, mono voice | −19 LUFS | −1.0 dBTP | Legacy `Preset::Talk` default |
 | Apple Podcasts, stereo | −16 LUFS | −1.0 dBTP | Default for `Preset::Music` |
 | Spotify (playback target) | −14 LUFS | −1.0 dBTP | Spotify normalises to −14; publishing louder gains nothing |
 | EBU R128 / broadcast | −23 LUFS | −1.0 dBTP | European broadcast |
@@ -75,9 +80,20 @@ touch:
 * **Mono ≤ 96 kbps MP3**, **stereo ≤ 192 kbps MP3**.
 
 `recommended_mp3_bitrate(channels)` encodes exactly this, and the export page
-uses it as the default and warns when a higher bitrate is chosen. Because the
-master is already loudness- and peak-conformant *before* encoding, a re-encode
-by the host cannot move it out of spec by any meaningful amount.
+uses it as the default and warns when a higher bitrate is chosen.
+
+The autonomous skill uses a different, explicit pair: **128 kbps mono / 256 kbps
+stereo**, LAME CBR, which is what Apple's guidance allows for podcast delivery.
+It is not a claim that a host will leave the file alone.
+
+Compliance is never asserted on the pre-encode master. The skill normalises to a
+−2 dBTP PCM ceiling for codec headroom, encodes, then decodes the whole MP3 and
+meters it with `ebur128=peak=true`; only that decoded measurement decides
+pass/fail. If the codec overshoots −1.0 dBTP, the ceiling is lowered by the
+measured excess plus 0.2 dB and the file is normalized again from the lossless
+master, up to three attempts. A file that cannot satisfy both the loudness
+tolerance and the peak ceiling fails with exit 3 and is not published under the
+expected name.
 
 Other formats are offered for archival or for hosts that accept them: WAV 16/24
 and 32-bit float, FLAC 24, and Ogg Vorbis. The build hides any format for which
@@ -105,6 +121,12 @@ overall verdict is false:
 Nothing else in the report decides conformance: the filler counts and the
 per-stage metrics are diagnostics, not gates.
 
+The skill's report has its own `conformance` object with `loudness_ok`,
+`true_peak_ok`, `duration_ok` and `codec_ok` (which also covers the channel
+count), all measured on the decoded MP3 rather than on the PCM master. The
+engine's `full_file_check` is a separate, earlier gate on preservation and never
+counts as a delivery verdict.
+
 ---
 
 ## 5. References
@@ -112,7 +134,8 @@ per-stage metrics are diagnostics, not gates.
 * ITU-R BS.1770-4, *Algorithms to measure audio programme loudness and true-peak
   audio level*.
 * EBU Tech 3341 / 3342, *Loudness metering and loudness range*.
-* Apple, *Podcast Authoring Practices* (−16 stereo / −19 mono, −1 dBTP).
+* Apple, *Podcast Authoring Practices* (about −16 LUFS and a −1 dBTP ceiling for
+  podcast delivery; the −19 mono figure is a legacy convention).
 * AES TD1004, *Recommendation for loudness of audio streaming*.
 * Buzzsprout / Transistor hosting documentation, for the no-re-encode MP3
   bitrate envelopes.

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "sanity/audio.hpp"
+
 namespace sanity {
 
 // K-weighting: stage 1 high shelf (+4 dB @ ~1681.97 Hz, Q 0.70718),
@@ -33,13 +35,24 @@ struct LoudnessStats {
 // 100 ms gating blocks, -70 LUFS absolute gate and -10 LU relative gate.
 LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate);
 
+// Channel-aware measurement: the K-weighted energy of every channel is summed
+// before gating, which is what BS.1770 specifies for stereo. Folding the
+// channels to mono first would understate anti-phase material and hide a
+// channel imbalance, so the multichannel path is the one the delivery checks
+// must use.
+LoudnessStats measure_loudness(const AudioBuffer& buffer);
+
 // Integrated loudness only. It runs a single K-weighting pass and skips the
 // true peak oversampling and the loudness range pass, which makes it cheap
 // enough to be called once per iteration of the normalisation loop.
 double integrated_lufs(const std::vector<float>& mono, int sample_rate);
+double integrated_lufs(const AudioBuffer& buffer);
 
 // LRA per EBU Tech 3342: 10th/95th percentile of gated short-term loudness.
 double loudness_range(const std::vector<float>& mono, int sample_rate);
+double loudness_range(const AudioBuffer& buffer);
 double true_peak_db(const std::vector<float>& mono, int sample_rate);
+// Maximum true peak across every channel of the buffer.
+double true_peak_db(const AudioBuffer& buffer);
 
 }  // namespace sanity

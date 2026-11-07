@@ -12,6 +12,8 @@ service that matter for spoken word:
 * loudness and true peak to the delivery standard (BS.1770-4), default
   −19 LUFS mono / −16 LUFS stereo, true peak ≤ −1 dBTP
 * a **Talk** preset and a **Music** preset
+* an autonomous, headless path for OpenCode: one request, one verified
+  `_processed.mp3`, every setting chosen from measurement
 
 Ships as a Windows **MSI** and a Linux **.deb**, from one CMake project.
 
@@ -42,9 +44,13 @@ generator needs the WiX Toolset on `PATH`.
 
 ```sh
 cd build
-cpack -G DEB      # Linux: podcast-sanity_0.1.0_amd64.deb
-cpack -G WIX      # Windows: podcast-sanity-0.1.0-win64.msi
+cpack -G DEB      # Linux: podcast-sanity_0.2.0_amd64.deb
+cpack -G WIX      # Windows: podcast-sanity-0.2.0-win64.msi
 ```
+
+Both packages carry the skill source and its installer under
+`share/podcast-sanity/`; nothing is copied into an OpenCode directory by the
+package itself.
 
 ---
 
@@ -78,6 +84,44 @@ podcast-sanity-render --gen-corpus demo.wav --profile home --seconds 30
 
 The renderer exits **3** when the result is not conformant.
 
+### From OpenCode: the `podcast-master` skill
+
+Linux preview: short synthetic recordings and discovery have been verified.
+Windows, real-speech calibration and the 60-minute memory gate are not yet
+release-qualified. See the
+[implementation status](docs/superpowers/plans/2026-11-07-podcast-master-progress.md).
+
+The skill turns one request into one verified MP3 beside the original:
+
+```text
+/recordings/Episode 07.take2.wav
+/recordings/Episode 07.take2_processed.mp3
+```
+
+It analyzes the file, compares four bounded restoration candidates on excerpts
+of the real material, keeps the strongest one that passes the preservation
+gates, levels with stereo-linked dynamics, then normalizes and encodes for
+delivery. Filler removal, silence trimming and time stretching are off, and the
+source is never modified.
+
+```sh
+# Install the skill into ~/.config/opencode/skills/podcast-master
+python3 tools/install_opencode_skill.py --action install \
+    --renderer build/podcast-sanity-render
+python3 tools/install_opencode_skill.py --action check --json
+
+# The same command the skill runs
+python3 ~/.config/opencode/skills/podcast-master/scripts/process_audio.py \
+    --input "/recordings/Episode 07.take2.wav" --json
+```
+
+`podcast` profile: −16 LUFS ±1 LU and true peak ≤ −1.0 dBTP, measured on the
+decoded MP3, LAME CBR 128 kbps mono / 256 kbps stereo. Runtime requirements are
+Python 3.10+, FFmpeg and ffprobe; the Qt application and a C++ compiler are not
+needed to process audio. Details in
+[`skills/podcast-master/SKILL.md`](skills/podcast-master/SKILL.md) and
+[`references/processing-policy.md`](skills/podcast-master/references/processing-policy.md).
+
 ---
 
 ## Documentation
@@ -86,8 +130,13 @@ The renderer exits **3** when the result is not conformant.
   the stage chain and why it is ordered that way, the GUI, packaging, limits.
 * [`docs/STANDARDS.md`](docs/STANDARDS.md) — what is measured, the delivery
   targets and where the numbers come from.
-* [`docs/TESTING.md`](docs/TESTING.md) — the unit, end-to-end and GUI suites,
-  the metrics, and how the Filler Killer thresholds were calibrated.
+* [`docs/TESTING.md`](docs/TESTING.md) — the unit, end-to-end, policy, runner
+  and GUI suites, the metrics, and how the Filler Killer thresholds were
+  calibrated.
+* [`skills/podcast-master/SKILL.md`](skills/podcast-master/SKILL.md) — the
+  OpenCode skill: one command, success checks, when to ask the user.
+* [`skills/podcast-master/references/processing-policy.md`](skills/podcast-master/references/processing-policy.md)
+  — candidates, gates, thresholds and the calibration evidence behind them.
 
 ## Verified, not asserted
 
@@ -95,6 +144,14 @@ The renderer exits **3** when the result is not conformant.
 * An 8-case / 42-check end-to-end harness that generates synthetic episodes with
   ground truth, masters them and judges loudness, true peak, filler precision and
   recall, SNR, SI-SDR, determinism and report completeness.
+* An 8-case / 84-check suite for the autonomous policy: determinism, clean
+  material staying untouched, noisy material being cleaned with measurable
+  evidence, bounded candidates, stereo preservation, empty input and the report
+  contract.
+* 8 runner contract tests that drive the real Python entry point against the
+  real renderer and FFmpeg: naming, collision without overwrite, real MP3 codec
+  and bitrate, final loudness and true peak on the decoded file, source hash
+  unchanged, stereo kept stereo, invalid input, exported report.
 * A GUI self test that walks all seven pages, masters, exports an MP3 and checks
   the report contract — run under `xvfb` in CI.
 * Every run emits a JSON response with per-stage timings, real-time factor,

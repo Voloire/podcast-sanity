@@ -47,25 +47,36 @@ int nearest_lame_rate(int rate) {
 #if SANITY_HAVE_MP3
 bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOptions& opt,
                 std::string& err) {
-    AudioBuffer src = in;
-    if (!lame_rate_ok(src.sample_rate)) {
-        const int target = nearest_lame_rate(src.sample_rate);
-        Resampler rs(src.sample_rate, target);
-        AudioBuffer rsb;
-        rsb.sample_rate = target;
-        rsb.channels = 1;
-        rsb.data = rs.process(to_mono(src));
-        src = rsb;
-        if (src.channels != 2) {
-            AudioBuffer dup = mono_to_channels(target, rsb.data, 2);
-            src = dup;
-        } else {
-            src = mono_to_channels(target, rsb.data, 2);
-        }
+    if (in.channels < 1 || in.channels > 2) {
+        // MP3 has no surround here, and silently folding a wider file would
+        // destroy the very content the caller asked to keep.
+        err = "MP3 export supports mono or stereo only";
+        return false;
     }
-    if (src.channels != 1 && src.channels != 2) {
-        // Fold anything wider down; MP3 has no surround here.
-        src = mono_to_channels(src.sample_rate, to_mono(src), 2);
+    const std::size_t frames = in.frames();
+    if (frames == 0) {
+        err = "nothing to encode";
+        return false;
+    }
+
+    // Deinterleave first: LAME wants one planar buffer per channel, and the
+    // previous code passed the interleaved buffer as if it were planar.
+    int rate = in.sample_rate;
+    std::vector<std::vector<float>> channels(static_cast<std::size_t>(in.channels));
+    for (int c = 0; c < in.channels; c++) {
+        channels[static_cast<std::size_t>(c)].resize(frames);
+        for (std::size_t i = 0; i < frames; i++)
+            channels[static_cast<std::size_t>(c)][i] =
+                in.data[i * static_cast<std::size_t>(in.channels) + static_cast<std::size_t>(c)];
+    }
+
+    // LAME accepts a fixed set of rates. Resample each channel on its own; the
+    // old fallback folded the material to mono and duplicated it.
+    if (!lame_rate_ok(rate)) {
+        const int target = nearest_lame_rate(rate);
+        Resampler rs(rate, target);
+        for (auto& channel : channels) channel = rs.process(channel);
+        rate = target;
     }
 
     lame_t gfp = lame_init();
@@ -73,13 +84,12 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
         err = "lame_init failed";
         return false;
     }
-    lame_set_in_samplerate(gfp, src.sample_rate);
-    lame_set_num_channels(gfp, src.channels);
-    lame_set_mode(gfp, src.channels == 1 ? MONO : JOINT_STEREO);
+    lame_set_in_samplerate(gfp, rate);
+    lame_set_num_channels(gfp, in.channels);
+    lame_set_mode(gfp, in.channels == 1 ? MONO : JOINT_STEREO);
     lame_set_brate(gfp, opt.mp3_bitrate_kbps);
     lame_set_quality(gfp, opt.mp3_quality);
     lame_set_VBR(gfp, vbr_off);
-    if (src.channels == 1) lame_set_num_channels(gfp, 1);
     if (lame_init_params(gfp) < 0) {
         lame_close(gfp);
         err = "lame_init_params failed";
@@ -93,17 +103,17 @@ bool encode_mp3(const std::string& path, const AudioBuffer& in, const ExportOpti
         return false;
     }
 
-    const std::size_t frames = src.frames();
+    const std::size_t out_frames = channels[0].size();
     const int chunk = 1152;
     std::vector<unsigned char> out(static_cast<std::size_t>(chunk) * 5 / 4 + 7200);
-    const float* left = src.channel(0);
-    const float* right = src.channels > 1 ? src.channel(1) : nullptr;
+    const float* left = channels[0].data();
+    const float* right = in.channels > 1 ? channels[1].data() : nullptr;
     std::size_t pos = 0;
     bool ok = true;
-    while (pos < frames) {
-        const int n = static_cast<int>(std::min<std::size_t>(chunk, frames - pos));
+    while (pos < out_frames) {
+        const int n = static_cast<int>(std::min<std::size_t>(chunk, out_frames - pos));
         int written;
-        if (src.channels == 1) {
+        if (in.channels == 1) {
             written = lame_encode_buffer_ieee_float(gfp, left + pos, left + pos, n, out.data(),
                                                     static_cast<int>(out.size()));
         } else {
@@ -161,7 +171,10 @@ bool encode_sndfile(const std::string& path, const AudioBuffer& in, const Export
         sf_command(sf, SFC_SET_VBR_ENCODING_QUALITY, &q, sizeof(double));
     }
     if (opt.format == ExportFormat::Flac) {
-        double level = opt.flac_compression;
+        // libsndfile takes the FLAC compression level as a 0..1 double, not as
+        // the 0..8 integer the CLI and the GUI expose.
+        double level = static_cast<double>(opt.flac_compression) / 8.0;
+        level = std::min(1.0, std::max(0.0, level));
         sf_command(sf, SFC_SET_COMPRESSION_LEVEL, &level, sizeof(double));
     }
     const std::size_t frames = in.frames();
@@ -224,6 +237,12 @@ std::string export_format_name(const ExportOptions& o) {
             return "MP3 " + std::to_string(o.mp3_bitrate_kbps) + " kbps";
     }
     return "WAV 16 bit";
+}
+
+bool known_audio_extension(const std::string& path) {
+    const std::string e = lower_ext(path);
+    return e == ".wav" || e == ".wave" || e == ".mp3" || e == ".flac" || e == ".ogg" ||
+           e == ".opus";
 }
 
 ExportOptions export_options_for_path(const std::string& path) {

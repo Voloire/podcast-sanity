@@ -34,19 +34,15 @@ void apply_gain_db(std::vector<float>& x, double db) {
 
 }  // namespace
 
-// ------------------------------------------------------- Adaptive Leveler
-LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
-                             const std::vector<FrameFeat>& feats, double strength) {
-    LevelerInfo info;
-    if (x.empty() || feats.size() < 20) return info;
-    const int hop = segmenter_hop(sample_rate);
+namespace {
 
-    // Group consecutive speech frames into segments and measure each segment.
-    struct Seg {
-        std::size_t a = 0, b = 0;
-        double level_db = 0.0;
-    };
-    std::vector<Seg> segs;
+struct SpeechSegment {
+    std::size_t a = 0, b = 0;
+    double level_db = 0.0;
+};
+
+std::vector<SpeechSegment> speech_segments(const std::vector<FrameFeat>& feats) {
+    std::vector<SpeechSegment> segs;
     std::size_t i = 0;
     while (i < feats.size()) {
         if (feats[i].speech && feats[i].rms_db > -70.0) {
@@ -57,7 +53,7 @@ LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
                 j++;
             }
             if (j - i >= 10) {  // at least 100 ms
-                Seg s;
+                SpeechSegment s;
                 s.a = i;
                 s.b = j;
                 s.level_db = median_of(lv);
@@ -68,6 +64,61 @@ LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
             i++;
         }
     }
+    return segs;
+}
+
+// Mean energy over a segment, summed across channels, expressed in dB.
+double segment_energy_db(const AudioBuffer& buffer, const SpeechSegment& seg, int hop) {
+    const std::size_t ch = static_cast<std::size_t>(buffer.channels > 0 ? buffer.channels : 1);
+    const std::size_t a = seg.a * static_cast<std::size_t>(hop);
+    const std::size_t b = std::min(buffer.frames(), seg.b * static_cast<std::size_t>(hop));
+    if (b <= a) return -200.0;
+    double e = 0.0;
+    for (std::size_t i = a; i < b; i++)
+        for (std::size_t c = 0; c < ch; c++) {
+            const double v = buffer.data[i * ch + c];
+            e += v * v;
+        }
+    const double ms = e / static_cast<double>(b - a);
+    return ms > 0 ? 10.0 * std::log10(ms) : -200.0;
+}
+
+// Applies one interpolated gain per frame to every channel of the buffer.
+void apply_frame_gain(AudioBuffer& buffer, const std::vector<double>& gain, int hop,
+                      double strength) {
+    if (gain.empty()) return;
+    const std::size_t ch = static_cast<std::size_t>(buffer.channels > 0 ? buffer.channels : 1);
+    const std::size_t n = buffer.frames();
+    const std::size_t gsz = gain.size();
+    const std::size_t h = static_cast<std::size_t>(hop > 0 ? hop : 1);
+    for (std::size_t f = 0; f < n; f++) {
+        const std::size_t fi = std::min(gsz - 1, f / h);
+        const std::size_t fn = std::min(gsz - 1, fi + 1);
+        const double t = static_cast<double>(f % h) / static_cast<double>(h);
+        const double g_db = (gain[fi] * (1.0 - t) + gain[fn] * t) * strength;
+        const float g = static_cast<float>(db_to_gain(g_db));
+        for (std::size_t c = 0; c < ch; c++) buffer.data[f * ch + c] *= g;
+    }
+}
+
+AudioBuffer wrap_mono(std::vector<float>& x, int sample_rate) {
+    AudioBuffer b;
+    b.sample_rate = sample_rate;
+    b.channels = 1;
+    b.data = std::move(x);
+    return b;
+}
+
+}  // namespace
+
+// ------------------------------------------------------- Adaptive Leveler
+LevelerInfo adaptive_leveler_channels(AudioBuffer& buffer, const std::vector<FrameFeat>& feats,
+                                      double strength) {
+    LevelerInfo info;
+    if (buffer.frames() == 0 || feats.size() < 20) return info;
+    const int hop = segmenter_hop(buffer.sample_rate);
+
+    const std::vector<SpeechSegment> segs = speech_segments(feats);
     if (segs.size() < 3) return info;
 
     std::vector<double> levels;
@@ -111,54 +162,63 @@ LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
     }
 
     const double s = std::max(0.0, std::min(1.0, strength));
-    for (std::size_t f = 0; f < x.size(); f++) {
-        const std::size_t fi = std::min(gain.size() - 1, f / static_cast<std::size_t>(hop));
-        const std::size_t fn = std::min(gain.size() - 1, fi + 1);
-        const double t = static_cast<double>(f % static_cast<std::size_t>(hop)) / hop;
-        const double g_db = (gain[fi] * (1.0 - t) + gain[fn] * t) * s;
-        x[f] = static_cast<float>(x[f] * db_to_gain(g_db));
-    }
+    apply_frame_gain(buffer, gain, hop, s);
     if (s > 0.0) info.applied = true;
 
     // Spread after: re-measure the segment levels from the processed signal.
-    {
-        std::vector<double> after;
-        for (const auto& seg : segs) {
-            const std::size_t a = seg.a * static_cast<std::size_t>(hop);
-            const std::size_t b = std::min(x.size(), seg.b * static_cast<std::size_t>(hop));
-            if (b <= a) continue;
-            double e = 0.0;
-            for (std::size_t k = a; k < b; k++) e += static_cast<double>(x[k]) * x[k];
-            const double ms = e / static_cast<double>(b - a);
-            after.push_back(ms > 0 ? 10.0 * std::log10(ms) : -200.0);
-        }
-        info.spread_after_db = percentile_of(after, 0.90) - percentile_of(after, 0.10);
-    }
+    std::vector<double> after;
+    for (const auto& seg : segs) after.push_back(segment_energy_db(buffer, seg, hop));
+    info.spread_after_db = percentile_of(after, 0.90) - percentile_of(after, 0.10);
+    return info;
+}
+
+LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
+                             const std::vector<FrameFeat>& feats, double strength) {
+    AudioBuffer buffer = wrap_mono(x, sample_rate);
+    const LevelerInfo info = adaptive_leveler_channels(buffer, feats, strength);
+    x = std::move(buffer.data);
     return info;
 }
 
 // ------------------------------------------------------------- compressor
-CompressorInfo compressor(std::vector<float>& x, int sample_rate, double threshold_db,
-                          double ratio, double attack_ms, double release_ms) {
+CompressorInfo compressor_channels(AudioBuffer& buffer, double threshold_db, double ratio,
+                                   double attack_ms, double release_ms) {
     CompressorInfo info;
-    if (x.empty() || ratio <= 1.0) return info;
+    if (buffer.frames() == 0 || ratio <= 1.0) return info;
     info.threshold_db = threshold_db;
     info.ratio = ratio;
+    const int sample_rate = buffer.sample_rate;
     const double atk = 1.0 - std::exp(-1.0 / std::max(1.0, attack_ms * 0.001 * sample_rate));
     const double rel = 1.0 - std::exp(-1.0 / std::max(1.0, release_ms * 0.001 * sample_rate));
+    const std::size_t ch = static_cast<std::size_t>(buffer.channels > 0 ? buffer.channels : 1);
+    const std::size_t n = buffer.frames();
     double gr = 0.0;
     double sum = 0.0;
-    for (float& v : x) {
-        const double lvl = 20.0 * std::log10(std::fabs(static_cast<double>(v)) + 1e-12);
+    for (std::size_t i = 0; i < n; i++) {
+        // The detector is the loudest channel, so a transient on either side
+        // ducks the whole image instead of shifting it.
+        double peak = 0.0;
+        for (std::size_t c = 0; c < ch; c++)
+            peak = std::max(peak, std::fabs(static_cast<double>(buffer.data[i * ch + c])));
+        const double lvl = 20.0 * std::log10(peak + 1e-12);
         double want = 0.0;
         if (lvl > threshold_db) want = (lvl - threshold_db) * (1.0 - 1.0 / ratio);
         if (want > gr) gr += atk * (want - gr);
         else gr += rel * (want - gr);
         sum += gr;
-        v = static_cast<float>(v * db_to_gain(-gr));
+        const float g = static_cast<float>(db_to_gain(-gr));
+        for (std::size_t c = 0; c < ch; c++) buffer.data[i * ch + c] *= g;
     }
-    info.gain_reduction_db = x.empty() ? 0.0 : sum / static_cast<double>(x.size());
+    info.gain_reduction_db = n > 0 ? sum / static_cast<double>(n) : 0.0;
     info.applied = info.gain_reduction_db > 0.05;
+    return info;
+}
+
+CompressorInfo compressor(std::vector<float>& x, int sample_rate, double threshold_db,
+                          double ratio, double attack_ms, double release_ms) {
+    AudioBuffer buffer = wrap_mono(x, sample_rate);
+    const CompressorInfo info = compressor_channels(buffer, threshold_db, ratio, attack_ms, release_ms);
+    x = std::move(buffer.data);
     return info;
 }
 

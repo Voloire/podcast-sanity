@@ -132,7 +132,16 @@ Analysis analyze_impl(const std::vector<float>& mono, int sample_rate,
         const long long total = static_cast<long long>(feats.size());
         a.speech_ratio = total ? static_cast<double>(speech) / total : 0.0;
         a.silence_ratio = total ? static_cast<double>(silent) / total : 0.0;
-        a.music_ratio = 0.0;  // the Talk chain does not need a music/vocal split
+        // A deliberately crude continuous-sound heuristic: non-speech frames
+        // that are clearly above the background, tonal enough not to be noise
+        // and not percussive. It is used only to lower restoration
+        // aggressiveness, never to claim a music/speech classification.
+        long long continuous = 0;
+        for (const auto& f : feats)
+            if (!f.speech && f.rms_db > a.noise_floor_db + 10.0 && f.flatness > 0.10 &&
+                f.flatness < 0.60 && f.zcr < 0.15)
+                continuous++;
+        a.music_ratio = total ? static_cast<double>(continuous) / total : 0.0;
         (void)quiet;
     }
 
@@ -183,6 +192,89 @@ Analysis analyze(const std::vector<float>& mono, int sample_rate) {
 Analysis analyze(const std::vector<float>& mono, int sample_rate,
                  const std::vector<FrameFeat>& feats) {
     return analyze_impl(mono, sample_rate, feats);
+}
+
+namespace {
+
+// The detector is the channel with the highest RMS. Summing L+R would cancel
+// anti-phase material and hide a one-sided voice, and averaging would understate
+// the channel that actually carries the speech.
+std::vector<float> pick_detector(const AudioBuffer& b, std::vector<double>& channel_rms) {
+    const int ch = b.channels > 0 ? b.channels : 1;
+    const std::size_t n = b.frames();
+    channel_rms.assign(static_cast<std::size_t>(ch), -200.0);
+    std::vector<double> energy(static_cast<std::size_t>(ch), 0.0);
+    for (int c = 0; c < ch; c++) {
+        double e = 0.0;
+        for (std::size_t i = 0; i < n; i++) {
+            const double v = b.data[i * static_cast<std::size_t>(ch) + static_cast<std::size_t>(c)];
+            e += v * v;
+        }
+        energy[static_cast<std::size_t>(c)] = n ? e / static_cast<double>(n) : 0.0;
+        channel_rms[static_cast<std::size_t>(c)] =
+            energy[static_cast<std::size_t>(c)] > 0
+                ? 10.0 * std::log10(energy[static_cast<std::size_t>(c)])
+                : -200.0;
+    }
+    int best = 0;
+    for (int c = 1; c < ch; c++)
+        if (energy[static_cast<std::size_t>(c)] > energy[static_cast<std::size_t>(best)]) best = c;
+    std::vector<float> detector(n, 0.0f);
+    for (std::size_t i = 0; i < n; i++)
+        detector[i] = b.data[i * static_cast<std::size_t>(ch) + static_cast<std::size_t>(best)];
+    return detector;
+}
+
+double stereo_correlation(const AudioBuffer& b) {
+    if (b.channels != 2) return 1.0;
+    const std::size_t n = b.frames();
+    double lr = 0.0, ll = 0.0, rr = 0.0;
+    for (std::size_t i = 0; i < n; i++) {
+        const double l = b.data[i * 2];
+        const double r = b.data[i * 2 + 1];
+        lr += l * r;
+        ll += l * l;
+        rr += r * r;
+    }
+    if (ll <= 1e-20 || rr <= 1e-20) return 1.0;
+    return lr / std::sqrt(ll * rr);
+}
+
+}  // namespace
+
+Analysis analyze(const AudioBuffer& buffer) {
+    Analysis a;
+    a.sample_rate = buffer.sample_rate;
+    a.channels = buffer.channels;
+    if (buffer.frames() == 0 || buffer.sample_rate <= 0) return a;
+
+    std::vector<double> channel_rms;
+    const std::vector<float> detector = pick_detector(buffer, channel_rms);
+    Segmenter seg(SegmenterConfig{buffer.sample_rate, 10.0, 35.0});
+    std::vector<FrameFeat> feats;
+    seg.features(detector, feats);
+
+    a = analyze_impl(detector, buffer.sample_rate, feats);
+    a.channels = buffer.channels;
+    a.channel_rms_db = channel_rms;
+    if (channel_rms.size() >= 2) {
+        std::vector<double> sorted = channel_rms;
+        std::sort(sorted.begin(), sorted.end());
+        a.channel_imbalance_db = sorted[sorted.size() - 1] - sorted[sorted.size() - 2];
+    }
+    a.stereo_correlation = stereo_correlation(buffer);
+
+    // Channel-aware loudness replaces the mono fold-down measurement.
+    const LoudnessStats m = measure_loudness(buffer);
+    a.integrated_lufs = m.integrated_lufs;
+    a.lra = m.lra;
+    a.true_peak_db = m.true_peak_db;
+    a.sample_peak_db = m.sample_peak_db;
+    a.max_momentary = m.max_momentary;
+    a.max_short_term = m.max_short_term;
+    a.dc_offset = m.dc_offset;
+    a.clipped_samples = m.clipped_samples;
+    return a;
 }
 
 }  // namespace sanity

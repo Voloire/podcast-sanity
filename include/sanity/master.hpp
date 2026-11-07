@@ -84,6 +84,13 @@ struct Analysis {
     double silence_ratio = 0.0;
     double sibilance_db = -1e30;     // 5-8 kHz to total ratio
     double speech_activity_db = -1e30;
+
+    // Per-channel evidence. `channels` above is the real channel count of the
+    // material, not an assumption, and the imbalance is the level difference
+    // between the two loudest channels in dB.
+    std::vector<double> channel_rms_db;
+    double channel_imbalance_db = 0.0;
+    double stereo_correlation = 1.0;  // 1 = identical, 0 = uncorrelated, -1 = anti-phase
 };
 
 struct FillerHit {
@@ -140,6 +147,12 @@ Analysis analyze(const std::vector<float>& mono, int sample_rate);
 // expensive part of the analysis).
 Analysis analyze(const std::vector<float>& mono, int sample_rate,
                  const std::vector<FrameFeat>& feats);
+
+// Channel-aware analysis. Features are taken from the channel with the highest
+// RMS (never from an L+R sum, which cancels anti-phase material), loudness is
+// measured with the BS.1770 channel-energy sum, and the channel balance is
+// reported so the automatic policy can refuse to change the stereo image.
+Analysis analyze(const AudioBuffer& buffer);
 
 // Filler Killer: hesitation candidate detection (acoustic, no ASR).
 std::vector<FillerHit> detect_fillers(const std::vector<float>& mono, int sample_rate,
