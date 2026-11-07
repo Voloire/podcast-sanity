@@ -69,16 +69,42 @@ double integrated_from_prefix(const std::vector<double>& prefix, std::size_t n,
     return lufs_from_ms(fsum / static_cast<double>(fcount));
 }
 
-// K-weights the signal and fills an energy prefix.
-void kweight_prefix(const std::vector<float>& mono, int sample_rate,
-                    std::vector<double>& prefix) {
-    KFilter kf;
-    kf.k = k_weighting_for(sample_rate);
-    prefix.assign(mono.size() + 1, 0.0);
-    for (std::size_t i = 0; i < mono.size(); i++) {
-        const double y = kf.process(mono[i]);
-        prefix[i + 1] = prefix[i] + y * y;
+// Channel-aware K-weighting: one filter state per channel, energies summed per
+// frame. Also reports the sample peak across channels, the mean DC offset over
+// every sample, and how many samples reached full scale.
+void kweight_prefix_buffer(const AudioBuffer& b, int sample_rate,
+                           std::vector<double>& prefix, double& peak, double& dc,
+                           long long& clipped) {
+    const int ch = b.channels > 0 ? b.channels : 1;
+    const std::size_t n = b.frames();
+    std::vector<KFilter> kf(static_cast<std::size_t>(ch));
+    for (auto& f : kf) f.k = k_weighting_for(sample_rate);
+    prefix.assign(n + 1, 0.0);
+    peak = 0.0;
+    dc = 0.0;
+    clipped = 0;
+    if (n == 0) return;
+    for (std::size_t i = 0; i < n; i++) {
+        double energy = 0.0;
+        for (int c = 0; c < ch; c++) {
+            const double x = b.data[i * static_cast<std::size_t>(ch) + static_cast<std::size_t>(c)];
+            peak = std::max(peak, std::fabs(x));
+            const double y = kf[static_cast<std::size_t>(c)].process(x);
+            energy += y * y;
+            dc += x;
+            if (std::fabs(x) >= 0.9999) clipped++;
+        }
+        prefix[i + 1] = prefix[i] + energy;
     }
+    dc /= static_cast<double>(n) * static_cast<double>(ch);
+}
+
+AudioBuffer as_buffer(const std::vector<float>& mono, int sample_rate) {
+    AudioBuffer b;
+    b.sample_rate = sample_rate;
+    b.channels = 1;
+    b.data = mono;
+    return b;
 }
 
 }  // namespace
@@ -127,21 +153,21 @@ double true_peak_db(const std::vector<float>& mono, int sample_rate) {
     return p > 0 ? 20.0 * std::log10(p) : -1e30;
 }
 
-double loudness_range(const std::vector<float>& mono, int sample_rate) {
-    if (mono.size() < static_cast<std::size_t>(sample_rate)) return 0.0;
-    KFilter kf;
-    kf.k = k_weighting_for(sample_rate);
-    std::vector<double> prefix(mono.size() + 1, 0.0);
-    for (std::size_t i = 0; i < mono.size(); i++) {
-        const double y = kf.process(mono[i]);
-        prefix[i + 1] = prefix[i] + y * y;
-    }
+double loudness_range(const AudioBuffer& buffer) {
+    const int sample_rate = buffer.sample_rate;
+    const std::size_t n = buffer.frames();
+    if (n == 0 || sample_rate <= 0) return 0.0;
+    if (n < static_cast<std::size_t>(sample_rate)) return 0.0;
+    std::vector<double> prefix;
+    double peak = 0.0, dc = 0.0;
+    long long clipped = 0;
+    kweight_prefix_buffer(buffer, sample_rate, prefix, peak, dc, clipped);
     const std::size_t win = static_cast<std::size_t>(sample_rate) * 3;  // 3 s
     const std::size_t step = static_cast<std::size_t>(sample_rate);     // 1 s
-    if (win > mono.size()) return 0.0;
+    if (win > n) return 0.0;
     // Gating must be done on energies, never on already offset loudness values.
     std::vector<double> z_abs, l_abs;
-    for (std::size_t a = 0; a + win <= mono.size(); a += step) {
+    for (std::size_t a = 0; a + win <= n; a += step) {
         const double z = ms_range(prefix, a, a + win);
         const double l = lufs_from_ms(z);
         if (l > -70.0) {
@@ -167,31 +193,28 @@ double loudness_range(const std::vector<float>& mono, int sample_rate) {
     return std::max(0.0, pct(0.95) - pct(0.10));
 }
 
-LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate) {
-    LoudnessStats s;
-    if (mono.empty() || sample_rate <= 0) return s;
+double loudness_range(const std::vector<float>& mono, int sample_rate) {
+    return loudness_range(as_buffer(mono, sample_rate));
+}
 
-    KFilter kf;
-    kf.k = k_weighting_for(sample_rate);
-    std::vector<double> prefix(mono.size() + 1, 0.0);
+LoudnessStats measure_loudness(const AudioBuffer& buffer) {
+    LoudnessStats s;
+    const int sample_rate = buffer.sample_rate;
+    const std::size_t n = buffer.frames();
+    if (n == 0 || sample_rate <= 0) return s;
+
+    std::vector<double> prefix;
     double peak = 0.0, dc = 0.0;
     long long clipped = 0;
-    for (std::size_t i = 0; i < mono.size(); i++) {
-        const double x = mono[i];
-        const double y = kf.process(x);
-        prefix[i + 1] = prefix[i] + y * y;
-        peak = std::max(peak, std::fabs(x));
-        dc += x;
-        if (std::fabs(x) >= 0.9999) clipped++;
-    }
-    s.dc_offset = dc / static_cast<double>(mono.size());
+    kweight_prefix_buffer(buffer, sample_rate, prefix, peak, dc, clipped);
+    s.dc_offset = dc;
     s.clipped_samples = clipped;
     s.sample_peak_db = peak > 0 ? 20.0 * std::log10(peak) : -1e30;
 
     // Gating blocks per ITU-R BS.1770-4: 400 ms long with 75 % overlap, i.e. a
     // 100 ms step. Gating is performed on block energies; the -0.691 offset is
     // applied exactly once, inside integrated_from_prefix().
-    s.integrated_lufs = integrated_from_prefix(prefix, mono.size(), sample_rate);
+    s.integrated_lufs = integrated_from_prefix(prefix, n, sample_rate);
     if (s.integrated_lufs < -1e29) return s;
     s.has_signal = true;
 
@@ -199,9 +222,9 @@ LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate) 
     const std::size_t hop = std::max<std::size_t>(1, static_cast<std::size_t>(sample_rate) / 10);
     const std::size_t mw = static_cast<std::size_t>(sample_rate) * 4 / 10;
     const std::size_t sw = static_cast<std::size_t>(sample_rate) * 3;
-    for (std::size_t a = 0; a + mw <= mono.size(); a += hop)
+    for (std::size_t a = 0; a + mw <= n; a += hop)
         s.max_momentary = std::max(s.max_momentary, lufs_from_ms(ms_range(prefix, a, a + mw)));
-    for (std::size_t a = 0; a + sw <= mono.size(); a += hop) {
+    for (std::size_t a = 0; a + sw <= n; a += hop) {
         const double l = lufs_from_ms(ms_range(prefix, a, a + sw));
         if (l <= -70.0) continue;
         s.max_short_term = std::max(s.max_short_term, l);
@@ -209,16 +232,42 @@ LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate) 
     }
     if (s.min_short_term > 1e29) s.min_short_term = s.integrated_lufs;
 
-    s.true_peak_db = true_peak_db(mono, sample_rate);
-    s.lra = loudness_range(mono, sample_rate);
+    s.true_peak_db = true_peak_db(buffer);
+    s.lra = loudness_range(buffer);
     return s;
 }
 
-double integrated_lufs(const std::vector<float>& mono, int sample_rate) {
-    if (mono.empty() || sample_rate <= 0) return -1e30;
+LoudnessStats measure_loudness(const std::vector<float>& mono, int sample_rate) {
+    return measure_loudness(as_buffer(mono, sample_rate));
+}
+
+double integrated_lufs(const AudioBuffer& buffer) {
+    const int sample_rate = buffer.sample_rate;
+    const std::size_t n = buffer.frames();
+    if (n == 0 || sample_rate <= 0) return -1e30;
     std::vector<double> prefix;
-    kweight_prefix(mono, sample_rate, prefix);
-    return integrated_from_prefix(prefix, mono.size(), sample_rate);
+    double peak = 0.0, dc = 0.0;
+    long long clipped = 0;
+    kweight_prefix_buffer(buffer, sample_rate, prefix, peak, dc, clipped);
+    return integrated_from_prefix(prefix, n, sample_rate);
+}
+
+double integrated_lufs(const std::vector<float>& mono, int sample_rate) {
+    return integrated_lufs(as_buffer(mono, sample_rate));
+}
+
+double true_peak_db(const AudioBuffer& buffer) {
+    const int ch = buffer.channels > 0 ? buffer.channels : 1;
+    const std::size_t n = buffer.frames();
+    if (n == 0) return -1e30;
+    double worst = -1e30;
+    std::vector<float> channel(n);
+    for (int c = 0; c < ch; c++) {
+        for (std::size_t i = 0; i < n; i++)
+            channel[i] = buffer.data[i * static_cast<std::size_t>(ch) + static_cast<std::size_t>(c)];
+        worst = std::max(worst, true_peak_db(channel, buffer.sample_rate));
+    }
+    return worst;
 }
 
 }  // namespace sanity

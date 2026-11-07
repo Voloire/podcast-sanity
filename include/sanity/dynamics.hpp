@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "sanity/audio.hpp"
 #include "sanity/dsp.hpp"
 
 namespace sanity {
@@ -23,6 +24,12 @@ struct LevelerInfo {
 LevelerInfo adaptive_leveler(std::vector<float>& x, int sample_rate,
                              const std::vector<FrameFeat>& feats, double strength);
 
+// Stereo-linked leveler: one gain envelope derived from the shared frame
+// features, applied to every channel. A per-channel envelope would pull the
+// image towards whichever side is speaking and is never what a podcast needs.
+LevelerInfo adaptive_leveler_channels(AudioBuffer& buffer, const std::vector<FrameFeat>& feats,
+                                      double strength);
+
 struct CompressorInfo {
     bool applied = false;
     double threshold_db = 0.0;
@@ -33,6 +40,11 @@ struct CompressorInfo {
 // Gentle speech compressor with a soft knee, then automatic makeup.
 CompressorInfo compressor(std::vector<float>& x, int sample_rate, double threshold_db,
                           double ratio, double attack_ms, double release_ms);
+
+// Stereo-linked compressor: the detector is the loudest channel per sample and
+// the resulting gain reduction is applied equally to every channel.
+CompressorInfo compressor_channels(AudioBuffer& buffer, double threshold_db, double ratio,
+                                   double attack_ms, double release_ms);
 
 struct LimiterInfo {
     bool applied = false;

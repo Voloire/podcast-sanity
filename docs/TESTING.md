@@ -1,6 +1,6 @@
 # Testing podcast-sanity
 
-Three suites, all driven by `ctest`, all autonomous — no human, no hardware and
+The suites are driven by `ctest`, without hardware or
 no golden files that need regenerating by hand.
 
 ```
@@ -11,7 +11,14 @@ cd build && ctest --output-on-failure
 |-------|--------|------|------|------------------|
 | `unit` | `sanity_tests` | 22 cases, 127 checks | ~0.6 s | The DSP primitives |
 | `e2e` | `sanity_e2e_tests` | 8 cases, 42 checks | ~40 s | The whole chain against ground truth |
+| `auto_policy` | `sanity_auto_tests` | 8 cases, 84 checks | ~45 s | The autonomous restoration policy |
+| `skill_runner` | `tests/test_skill_runner.py` | 8 tests | ~36 s | The deliverable a user gets |
+| `skill_safety` | `tests/test_skill_safety.py` | 6 tests | <1 s | Publication and installer failure paths |
 | `gui` | `podcast-sanity --selftest` | walks 7 pages + master + export | ~5 s | The interface wiring |
+
+`skill_runner` needs Python 3.10+, `ffmpeg` and `ffprobe`, and is skipped at
+configure time when one of them is missing. Everything else needs only the
+build tree.
 
 ---
 
@@ -96,7 +103,53 @@ is how the thresholds were calibrated at 20 s, 30 s and 45 s.
 
 ---
 
-## 3. How the Filler Killer thresholds were calibrated
+## 3. The autonomous policy suite (`tests/auto_master_tests.cpp`)
+
+`auto_policy` tests the part of 0.2 that decides what to do with a file, on the
+same synthetic corpus the end-to-end harness uses:
+
+* **Determinism** — two runs on the same buffer select the same profile and
+  produce bit-identical candidate metrics.
+* **Clean material stays untouched** — the `studio` profile selects
+  `preservation`, with denoise at 0 and no fallback.
+* **Noisy material is cleaned with evidence** — the `rough` profile selects a
+  non-preservation candidate, its quiet-region reduction is at least 1 dB, its
+  speech-band loss stays within 1.5 dB and its SI-SDR against the preservation
+  render is not negative.
+* **Bounds** — exactly four candidates, at most eight excerpts, denoise within
+  0…1.2 and de-reverb within 0…0.6; a file shorter than the excerpt budget is
+  compared in full.
+* **Stereo** — a delayed, quieter right channel survives with two channels, the
+  same length, a mean L/R difference above 1e-4 and an imbalance change below
+  0.5 dB.
+* **Empty input and report contract** — an empty buffer produces a warning, not
+  a guess; the JSON contains every documented section and no `nan`/`inf`.
+
+The thresholds and the reasoning behind them are in
+`skills/podcast-master/references/processing-policy.md`.
+
+---
+
+## 4. The runner contract suite (`tests/test_skill_runner.py`)
+
+`skill_runner` drives the real `process_audio.py` with the real renderer and the
+real FFmpeg, because the deliverable is the file, not the function:
+
+| Test | What it proves |
+|------|----------------|
+| doctor | the runtime check finds a compatible renderer and MP3 encoder |
+| one request | `Episode 07.take2.wav` becomes `Episode 07.take2_processed.mp3`, codec `mp3`, 128 kbps mono, −16 LUFS ±1, true peak ≤ −1 dBTP, source hash unchanged |
+| collision | a second run exits 5, leaves the existing file byte-identical and invents no numbered name; `--overwrite` replaces it |
+| stereo | a two-channel source stays two channels at 256 kbps with distinct L/R content |
+| invalid input | a missing or empty file exits 2 and leaves no output |
+| report | `--report` writes the same contract the runner returns |
+
+Run it directly with `PODCAST_TEST_RENDERER=build/podcast-sanity-render`, or let
+`ctest -R skill_runner` supply the just-built executable.
+
+---
+
+## 5. How the Filler Killer thresholds were calibrated
 
 The thresholds are not guesses. `Segmenter` features were dumped for every
 candidate on the corpus at three lengths, each candidate was scored, and the
@@ -115,7 +168,7 @@ opt-in.
 
 ---
 
-## 4. The GUI self test
+## 6. The GUI self test
 
 ```
 xvfb-run -a --server-args="-screen 0 1400x900x24" \
@@ -155,7 +208,7 @@ through the same path the user takes.
 
 ---
 
-## 5. Debug tooling
+## 7. Debug tooling
 
 The throwaway programs used during development are described here so they can be
 rebuilt: `/tmp/dbgchain.cpp` (per-stage SI-SDR), `/tmp/dbgfill3.cpp` (filler
@@ -173,7 +226,7 @@ cmake -S . -B build-dbg -G Ninja -DSANITY_WITH_GUI=OFF \
 
 ---
 
-## 6. Reproducing a result from the CLI
+## 8. Reproducing a result from the CLI
 
 The CLI is the same engine, so anything the GUI can do can be scripted:
 
@@ -188,7 +241,12 @@ podcast-sanity-render /tmp/c.wav --out /tmp/c-master.wav \
                       --summary --report /tmp/c-report.json
 
 # Measure without touching the audio
-podcast-sanity-render /tmp/c.wav --analyze-only
+podcast-sanity-render /tmp/c.wav --analyze-only --print-json
+
+# The autonomous path and its machine-readable contract
+podcast-sanity-render --capabilities --print-json
+podcast-sanity-render /tmp/c.wav --auto-clean --out /tmp/c-clean.wav \
+                      --report /tmp/c-engine.json --quiet
 ```
 
 The renderer exits **3** when the result is not conformant, so a CI job can gate

@@ -14,3 +14,5 @@ cmake-build-*/
 *.msi
 *.rpm
 _CPack_Packages/
+__pycache__/
+*.pyc

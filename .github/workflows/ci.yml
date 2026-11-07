@@ -21,7 +21,7 @@ jobs:
             qt6-base-dev qt6-multimedia-dev qt6-base-dev-tools \
             libgl1-mesa-dev \
             libmp3lame-dev libsndfile1-dev libebur128-dev \
-            xvfb
+            ffmpeg python3 xvfb
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSANITY_WITH_GUI=ON
@@ -31,6 +31,37 @@ jobs:
 
       - name: Test (unit, end-to-end, GUI under xvfb)
         run: ctest --test-dir build --output-on-failure
+
+      - name: Skill smoke test (install, doctor, one verified MP3)
+        run: |
+          set -euo pipefail
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg"
+          ROOT="$XDG_CONFIG_HOME/opencode"
+          python3 tools/install_opencode_skill.py --action install \
+            --renderer build/podcast-sanity-render --json
+          python3 tools/install_opencode_skill.py --action check --json
+          build/podcast-sanity-render --gen-corpus "$RUNNER_TEMP/skill.wav" \
+            --profile rough --seconds 6 --quiet
+          cp "$RUNNER_TEMP/skill.wav" "$RUNNER_TEMP/Skill Smoke.wav"
+          cd "$RUNNER_TEMP"
+          python3 "$ROOT/skills/podcast-master/scripts/process_audio.py" \
+            --doctor --json > /dev/null
+          python3 "$ROOT/skills/podcast-master/scripts/process_audio.py" \
+            --input "$RUNNER_TEMP/Skill Smoke.wav" \
+            --json > "$RUNNER_TEMP/result.json"
+          python3 - <<'PY'
+          import json, os, subprocess
+          result = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "result.json")))
+          assert result["ok"] and result["conformance"]["ok"], result
+          out = result["output"]["path"]
+          assert out.endswith("Skill Smoke_processed.mp3"), out
+          assert result["output"]["codec"] == "mp3"
+          assert abs(result["measurements"]["integrated_lufs"] + 16.0) <= 1.0
+          assert result["measurements"]["true_peak_dbtp"] <= -1.0
+          subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", out,
+                          "-f", "null", "-"], check=True)
+          print("skill smoke ok:", result["measurements"])
+          PY
 
       - name: Package .deb
         run: |
@@ -83,9 +114,10 @@ jobs:
           modules: 'qtmultimedia'
           cache: true
 
-      - name: Install WiX and codec libraries
+      - name: Install WiX, FFmpeg and codec libraries
         run: |
           choco install wixtoolset --no-progress -y
+          choco install ffmpeg --no-progress -y
           echo "WIX=$env:WIX" >> $env:GITHUB_ENV
           vcpkg install mp3lame libsndfile --triplet x64-windows
 
@@ -102,16 +134,44 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       # The codec libraries are optional by design, so a missing one degrades
-      # the build silently. Fail loudly instead of shipping an installer whose
-      # MP3 export button does nothing.
+      # the build silently. Assert the actual codec, channel count and duration
+      # of the written file, not just that a file exists: the old smoke test
+      # passed while `--out x.mp3` was writing WAV bytes.
       - name: Smoke test the codecs
         run: |
+          build\Release\podcast-sanity-render.exe --capabilities --print-json
           build\Release\podcast-sanity-render.exe --gen-corpus smoke.wav --profile home --seconds 5 --quiet
           build\Release\podcast-sanity-render.exe smoke.wav --out smoke.mp3 --summary
           build\Release\podcast-sanity-render.exe smoke.wav --out smoke.flac --summary
+          build\Release\podcast-sanity-render.exe smoke.wav --auto-clean --out clean.wav --quiet
           if (-not (Test-Path smoke.mp3)) { throw "MP3 export is missing from this build" }
           if (-not (Test-Path smoke.flac)) { throw "FLAC export is missing from this build" }
-          Get-Item smoke.mp3, smoke.flac | Select-Object Name, Length
+          $mp3 = ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,sample_rate -of json smoke.mp3 | ConvertFrom-Json
+          if ($mp3.streams[0].codec_name -ne "mp3") { throw "smoke.mp3 is not MP3: $($mp3.streams[0].codec_name)" }
+          if ($mp3.streams[0].channels -ne 1) { throw "mono input produced $($mp3.streams[0].channels) channels" }
+          $flac = ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels -of json smoke.flac | ConvertFrom-Json
+          if ($flac.streams[0].codec_name -ne "flac") { throw "smoke.flac is not FLAC" }
+          $clean = ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,duration -of json clean.wav | ConvertFrom-Json
+          if ($clean.streams[0].codec_name -ne "pcm_f32le") { throw "auto-clean did not write a float WAV" }
+          ffmpeg -v error -xerror -i smoke.mp3 -f null -
+          if ($LASTEXITCODE -ne 0) { throw "smoke.mp3 does not decode cleanly" }
+          Get-Item smoke.mp3, smoke.flac, clean.wav | Select-Object Name, Length
+
+      # The runner is the user-facing deliverable; prove it works with the
+      # packaged toolchain and not only with the developer's PATH.
+      - name: Skill runner smoke test
+        run: |
+          $env:XDG_CONFIG_HOME = "$env:RUNNER_TEMP\xdg"
+          python tools/install_opencode_skill.py --action install --renderer "build\Release\podcast-sanity-render.exe" --json
+          python tools/install_opencode_skill.py --action check --json
+          build\Release\podcast-sanity-render.exe --gen-corpus skill.wav --profile rough --seconds 6 --quiet
+          $result = python "$env:XDG_CONFIG_HOME\opencode\skills\podcast-master\scripts\process_audio.py" --input (Resolve-Path skill.wav).Path --json | ConvertFrom-Json
+          if (-not $result.ok) { throw "runner failed: $($result.error.message)" }
+          if ($result.output.codec -ne "mp3") { throw "runner output is not MP3" }
+          if ([math]::Abs($result.measurements.integrated_lufs + 16.0) -gt 1.0) { throw "loudness out of tolerance: $($result.measurements.integrated_lufs)" }
+          if ($result.measurements.true_peak_dbtp -gt -1.0) { throw "true peak above the ceiling: $($result.measurements.true_peak_dbtp)" }
+          if (-not (Test-Path "skill_processed.mp3")) { throw "runner did not write the expected file" }
+          Write-Host "skill runner ok: $($result.measurements)"
 
       - name: Package MSI and portable ZIP
         run: cd build && cpack -C Release

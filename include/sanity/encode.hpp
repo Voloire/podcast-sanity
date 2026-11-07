@@ -32,6 +32,9 @@ std::string export_format_name(const ExportOptions& o);
 std::string export_extension(ExportFormat f);
 // Guesses the format from the extension, falling back to WAV 16.
 ExportOptions export_options_for_path(const std::string& path);
+// True when the extension is one this module knows how to dispatch. The CLI
+// uses it to reject `--out mix.aiff` instead of writing mislabeled WAV bytes.
+bool known_audio_extension(const std::string& path);
 
 // Encodes `in` to `path`. Sample rate and channel count are taken from `in`.
 bool encode_audio(const std::string& path, const AudioBuffer& in, const ExportOptions& opt,

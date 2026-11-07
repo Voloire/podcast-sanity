@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(podcast-sanity VERSION 0.1.0 LANGUAGES CXX)
+project(podcast-sanity VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,6 +33,7 @@ set(SANITY_CORE_SOURCES
   src/filler.cpp
   src/analyze.cpp
   src/pipeline.cpp
+  src/auto_master.cpp
   src/corpus.cpp
   src/metrics.cpp
   src/encode.cpp
@@ -40,6 +41,9 @@ set(SANITY_CORE_SOURCES
 
 add_library(sanity_core STATIC ${SANITY_CORE_SOURCES})
 target_include_directories(sanity_core PUBLIC include)
+# One version for every target: the runner refuses an old renderer by reading
+# this value from --capabilities, so a fallback literal would defeat it.
+target_compile_definitions(sanity_core PUBLIC SANITY_VERSION="${PROJECT_VERSION}")
 if(SANITY_SANITIZE)
   target_compile_options(sanity_core PUBLIC -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(sanity_core PUBLIC -fsanitize=address,undefined)
@@ -136,6 +140,33 @@ endif()
 
 add_test(NAME unit COMMAND sanity_tests)
 
+# The autonomous policy gets its own target: it renders four candidates per
+# file, so it is slower than the primitive tests and must not hide them.
+add_executable(sanity_auto_tests tests/auto_master_tests.cpp)
+target_link_libraries(sanity_auto_tests PRIVATE sanity_core)
+target_include_directories(sanity_auto_tests PRIVATE tests)
+add_test(NAME auto_policy COMMAND sanity_auto_tests)
+set_tests_properties(auto_policy PROPERTIES TIMEOUT 900)
+
+# The skill runner is tested as the user uses it: the real Python entry point,
+# the real renderer, the real FFmpeg. Skipped when a dependency is missing, so
+# a minimal build still configures.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME skill_safety
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_safety.py)
+endif()
+find_program(SANITY_FFMPEG ffmpeg)
+find_program(SANITY_FFPROBE ffprobe)
+if(Python3_Interpreter_FOUND AND SANITY_FFMPEG AND SANITY_FFPROBE)
+  add_test(NAME skill_runner
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_runner.py)
+  set_tests_properties(skill_runner PROPERTIES TIMEOUT 900
+    ENVIRONMENT "PODCAST_TEST_RENDERER=$<TARGET_FILE:podcast-sanity-render>")
+else()
+  message(STATUS "Python3/FFmpeg/ffprobe not all found: skill runner tests skipped")
+endif()
+
 # ---- end-to-end harness ----------------------------------------------------
 # Generates synthetic episodes with ground truth, runs the whole chain and
 # judges the result. Slower than the unit tests, so it is a separate target.
@@ -222,6 +253,15 @@ if(TARGET podcast-sanity)
   install(TARGETS podcast-sanity RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
+# The skill source and its installer travel with the package, but the package
+# never copies anything into an OpenCode directory: installing the skill is an
+# explicit `install_opencode_skill.py --action install`.
+install(DIRECTORY skills/podcast-master
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/podcast-sanity/skills
+        PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+install(FILES tools/install_opencode_skill.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/podcast-sanity/tools)
+
 # Desktop integration is a freedesktop concept. Installing it on Windows would
 # drop .desktop files and AppStream metadata into the MSI, which nothing there
 # can read.
@@ -268,7 +308,7 @@ set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/voloire/podcast-sanity")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "podcast-sanity" "podcast-sanity")
 # Without this the WiX default is "<name> <version>", which puts every release
-# in its own "podcast-sanity 0.1.0" folder under Program Files.
+# in its own "podcast-sanity <version>" folder under Program Files.
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "podcast-sanity")
 
 # --- Debian / Ubuntu -------------------------------------------------------

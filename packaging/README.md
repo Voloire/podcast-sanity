@@ -21,17 +21,29 @@ The package contains:
 | `/usr/share/applications/podcast-sanity.desktop` | launcher entry |
 | `/usr/share/icons/hicolor/scalable/apps/podcast-sanity.svg` | icon |
 | `/usr/share/metainfo/io.github.voloire.podcast-sanity.metainfo.xml` | AppStream |
+| `/usr/share/podcast-sanity/skills/podcast-master/` | the OpenCode skill source |
+| `/usr/share/podcast-sanity/tools/install_opencode_skill.py` | its installer |
+
+The package does not copy anything into an OpenCode directory. Installing the
+skill is an explicit step, from the checkout or from the installed copy:
+
+```sh
+sudo apt install ./podcast-sanity_0.2.0_amd64.deb
+python3 /usr/share/podcast-sanity/tools/install_opencode_skill.py \
+    --action install --renderer /usr/bin/podcast-sanity-render
+```
 
 Runtime dependencies are resolved by `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` and pinned
 explicitly to `libqt6widgets6`, `libqt6multimedia6`, `libmp3lame0` and
 `libsndfile1`. `qt6-qpa-plugins`, `qt6-multimedia-plugins` and `ffmpeg` are
 recommended: the app runs without them in file/corpus test mode, but live
-microphone capture needs the multimedia backend and a platform plugin.
+microphone capture needs the multimedia backend and a platform plugin. The
+skill itself needs `python3` and `ffmpeg` (which ships `ffprobe`), nothing else.
 
 Install and remove:
 
 ```sh
-sudo apt install ./podcast-sanity_0.1.0_amd64.deb
+sudo apt install ./podcast-sanity_0.2.0_amd64.deb
 sudo apt remove podcast-sanity
 ```
 

@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Voloire/podcast-sanity/skills/podcast-master/references/report-schema.json",
+  "title": "podcast-master runner result",
+  "description": "The single JSON object the runner writes on stdout in --json mode, or to --report. Schema version 1. Success and failure share the envelope; only success carries the delivery sections.",
+  "type": "object",
+  "required": ["schema_version", "ok", "exit_code", "status"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "exit_code": {
+      "type": "integer",
+      "enum": [0, 1, 2, 3, 4, 5, 130],
+      "description": "0 success, 1 I/O or engine failure, 2 invalid request, 3 delivery gate failure, 4 dependency error, 5 collision, 130 cancelled."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "processing_error",
+        "invalid_request",
+        "quality_gate_failed",
+        "dependency_error",
+        "collision",
+        "cancelled"
+      ]
+    },
+    "error": {
+      "type": ["object", "null"],
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "properties": { "elapsed_s": { "type": "number", "minimum": 0 } }
+    },
+    "input": {
+      "type": "object",
+      "required": ["path", "sha256", "channels", "duration_s"],
+      "properties": {
+        "path": { "type": "string", "description": "Absolute resolved path of the untouched source." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "codec": { "type": ["string", "null"] },
+        "channels": { "type": "integer", "enum": [1, 2] },
+        "sample_rate": { "type": "integer" },
+        "duration_s": { "type": "number", "minimum": 0 },
+        "stream_index": { "type": ["integer", "null"] }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["path", "sha256", "codec", "channels", "duration_s"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "codec": { "const": "mp3" },
+        "channels": { "type": "integer", "enum": [1, 2] },
+        "sample_rate": { "type": "integer" },
+        "bit_rate_kbps": { "type": "number" },
+        "duration_s": { "type": "number" },
+        "integrated_lufs": { "type": ["number", "null"] },
+        "loudness_range_lu": { "type": ["number", "null"] },
+        "true_peak_dbtp": { "type": ["number", "null"] }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": { "enum": ["podcast", "speech-mono"] },
+        "target_lufs": { "type": "number" },
+        "tolerance_lu": { "type": "number" },
+        "max_true_peak_dbtp": { "type": "number" },
+        "mp3_bitrate_kbps": { "type": "integer" }
+      }
+    },
+    "measurements": {
+      "type": "object",
+      "description": "Measured on the decoded final MP3, never on the PCM master.",
+      "properties": {
+        "integrated_lufs": { "type": ["number", "null"] },
+        "true_peak_dbtp": { "type": ["number", "null"] },
+        "loudness_range_lu": { "type": ["number", "null"] }
+      }
+    },
+    "conformance": {
+      "type": "object",
+      "properties": {
+        "loudness_ok": { "type": "boolean" },
+        "true_peak_ok": { "type": "boolean" },
+        "duration_ok": { "type": "boolean" },
+        "codec_ok": { "type": "boolean" },
+        "ok": { "type": "boolean" }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "properties": {
+          "attempt": { "type": "integer", "minimum": 1 },
+          "pcm_ceiling_dbtp": { "type": "number" },
+          "target_lufs": { "type": "number" },
+          "normalization_type": { "type": ["string", "null"] },
+          "measured": { "$ref": "#/$defs/deliveryMeasurement" }
+        }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "description": "Renderer diagnostics, distinct from delivery conformance.",
+      "properties": {
+        "tool": { "const": "podcast-sanity" },
+        "version": { "type": "string" },
+        "policy_version": { "type": "string" },
+        "evidence_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "full_file_fallback": { "type": "boolean" },
+        "fallback_reason": { "type": "string" },
+        "analysis": { "$ref": "#/$defs/analysis" },
+        "excerpts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "start_s": { "type": "number" },
+              "end_s": { "type": "number" },
+              "reason": { "type": "string" }
+            }
+          }
+        },
+        "chosen": { "$ref": "#/$defs/settings" },
+        "candidates": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "allOf": [{ "$ref": "#/$defs/settings" }],
+            "type": "object",
+            "properties": {
+              "profile": { "type": "string" },
+              "rejected": { "type": "boolean" },
+              "reject_reason": { "type": "string" },
+              "quiet_reduction_db": { "type": "number" },
+              "hum_reduction_db": { "type": "number" },
+              "speech_envelope_db": { "type": "number" },
+              "speech_band_db": { "type": "number" },
+              "speech_si_sdr_db": { "type": "number" },
+              "stereo_imbalance_change_db": { "type": "number" },
+              "new_clipped": { "type": "integer" },
+              "score_db": { "type": "number" },
+              "selected": { "type": "boolean" }
+            }
+          }
+        },
+        "full_file_check": {
+          "type": "object",
+          "properties": {
+            "speech_envelope_db": { "type": "number" },
+            "speech_band_db": { "type": "number" },
+            "stereo_imbalance_change_db": { "type": "number" },
+            "new_clipped": { "type": "integer" }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "versions": {
+      "type": "object",
+      "properties": {
+        "runner": { "type": "string" },
+        "schema": { "type": "integer" },
+        "policy": { "type": "string" },
+        "renderer": { "type": "string" },
+        "ffmpeg": { "type": "string" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": true } }, "required": ["ok"] },
+      "then": {
+        "required": [
+          "input",
+          "output",
+          "profile",
+          "measurements",
+          "conformance",
+          "attempts",
+          "engine",
+          "versions",
+          "timing"
+        ]
+      },
+      "else": { "required": ["error"] }
+    }
+  ],
+  "$defs": {
+    "analysis": {
+      "type": "object",
+      "properties": {
+        "sample_rate": { "type": "integer" },
+        "channels": { "type": "integer" },
+        "duration_s": { "type": "number" },
+        "integrated_lufs": { "type": "number" },
+        "loudness_range_lu": { "type": "number" },
+        "true_peak_dbtp": { "type": "number" },
+        "sample_peak_dbfs": { "type": "number" },
+        "noise_floor_db": { "type": "number" },
+        "noise_avg_db": { "type": "number" },
+        "noise_regions": { "type": "integer" },
+        "hum_freq_hz": { "type": "number" },
+        "hum_level_db": { "type": "number" },
+        "hum_present": { "type": "boolean" },
+        "dc_offset": { "type": "number" },
+        "clipped_samples": { "type": "integer" },
+        "rt60_s": { "type": "number" },
+        "speech_ratio": { "type": "number" },
+        "music_ratio": { "type": "number" },
+        "silence_ratio": { "type": "number" },
+        "sibilance_db": { "type": "number" },
+        "active_speech_db": { "type": "number" },
+        "channel_imbalance_db": { "type": "number" },
+        "stereo_correlation": { "type": "number" },
+        "channel_rms_db": { "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "profile": { "type": "string" },
+        "denoise_strength": { "type": "number" },
+        "dereverb": { "type": "boolean" },
+        "dereverb_strength": { "type": "number" },
+        "deess": { "type": "boolean" },
+        "deess_amount": { "type": "number" },
+        "dehum": { "type": "boolean" },
+        "adaptive_highpass": { "type": "boolean" },
+        "declick": { "type": "boolean" },
+        "leveler": { "type": "boolean" },
+        "leveler_strength": { "type": "number" },
+        "compress": { "type": "boolean" },
+        "compressor_threshold_db": { "type": "number" },
+        "compressor_ratio": { "type": "number" },
+        "confidence": { "type": "number" }
+      }
+    },
+    "deliveryMeasurement": {
+      "type": "object",
+      "properties": {
+        "integrated_lufs": { "type": ["number", "null"] },
+        "loudness_range_lu": { "type": ["number", "null"] },
+        "true_peak_dbtp": { "type": ["number", "null"] },
+        "codec": { "type": ["string", "null"] },
+        "channels": { "type": "integer" },
+        "sample_rate": { "type": "integer" },
+        "bit_rate_kbps": { "type": "number" },
+        "duration_s": { "type": "number" }
+      }
+    }
+  }
+}

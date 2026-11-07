@@ -41,13 +41,23 @@ tests, the e2e harness and the GUI all exercise exactly the same code.
 
 ### 2.1 Signal path
 
-Everything is processed as a **mono sum**. Multi-channel input is folded to mono
-with `to_mono()`, the chain runs once, and the result is duplicated to the
-requested output channel count (`mono_to_channels()`). This is a deliberate
-trade-off: podcast speech is effectively mono, and processing one channel keeps
-the leveler and limiter envelopes identical across channels, which is what
-prevents the stereo image from wobbling. **Stereo imaging is not processed** —
-see §7.
+Two paths share the same primitives.
+
+**Desktop and legacy CLI (`master()`, `src/pipeline.cpp`)** work on a mono sum:
+multi-channel input is folded with `to_mono()`, the chain runs once, and the
+result is duplicated to the requested output channel count
+(`mono_to_channels()`). This keeps the leveler and limiter envelopes identical
+across channels, which is what prevents the stereo image from wobbling, but it
+does collapse genuine stereo content — see §7.
+
+**The autonomous path (`auto_clean()`, `src/auto_master.cpp`, used by the
+`podcast-master` skill)** never folds. It measures with the BS.1770 channel
+energy sum, takes its detector from the loudest channel rather than an L+R sum
+(an anti-phase voice would cancel), cleans each channel with its own noise
+estimate but a shared frame grid, and applies one stereo-linked gain envelope
+from `adaptive_leveler_channels()` / `compressor_channels()`. Mono stays mono,
+stereo stays stereo, and the report carries the per-channel RMS, the imbalance
+and the correlation so a broken image is visible.
 
 Stage order in `master()` (`src/pipeline.cpp`):
 
@@ -267,23 +277,50 @@ Device hot-plug and a full guided level-calibration wizard are wired at the
   runtime and codec DLLs to the MSI.
 * Both are driven from the same `CMakeLists.txt`; `CPACK_GENERATOR` selects
   `DEB;TGZ` on Linux and `WIX;ZIP` on Windows.
+* Both packages also carry the skill source under
+  `share/podcast-sanity/skills/podcast-master` and the installer
+  `share/podcast-sanity/tools/install_opencode_skill.py`. Nothing is copied into
+  an OpenCode directory by the package: installing the skill is an explicit
+  `--action install` (see §5.1).
+
+### 5.1 The OpenCode skill
+
+`skills/podcast-master/` is the canonical copy. `tools/install_opencode_skill.py`
+copies it complete into the global OpenCode skills directory
+(`~/.config/opencode/skills/podcast-master`, honouring `XDG_CONFIG_HOME` and
+`--config-root`), writes `~/.config/opencode/podcast-master/runtime.json` with the
+resolved renderer, ffmpeg and ffprobe, and records a manifest of the installed
+files. `check`, `install`, `update` and `uninstall` are the only actions; `update`
+backs up the previous installation first, and `uninstall` removes only files whose
+hash still matches the manifest. `opencode.json` is not modified: standard
+discovery is enough.
 
 ---
 
 ## 6. What is verified, and how
 
 See `TESTING.md`. In short: 22 unit cases / 127 checks, an 8-case / 42-check
-end-to-end harness over synthetic episodes with ground truth, and a GUI self test
+end-to-end harness over synthetic episodes with ground truth, an 8-case /
+84-check suite for the autonomous policy, 6 runner contract tests that drive the
+real Python entry point against the real renderer and FFmpeg, and a GUI self test
 that walks all seven pages, masters, exports an MP3 and checks the report
-contract. All three run under `ctest`.
+contract. All of them run under `ctest`.
 
 ---
 
 ## 7. Known limitations
 
-* **Stereo imaging is not processed.** The chain works on the mono sum, so any
-  genuine stereo content (music beds, wide ambience) is collapsed and re-spread.
-  A per-channel or mid/side path is the next significant piece of work.
+* **The desktop chain does not process stereo imaging.** `master()` works on the
+  mono sum, so genuine stereo content (music beds, wide ambience) is collapsed
+  and re-spread. The autonomous skill path preserves channels and links its
+  dynamics; the GUI path has not been migrated to it yet.
+* **No perceptual model.** The autonomous policy scores candidates on measured
+  quiet-region reduction and preservation proxies (speech envelope, speech band,
+  SI-SDR against the preservation render). It is calibrated on synthetic
+  material; real recordings are required release evidence and are not yet part
+  of the automated suite.
+* **No declipper.** Click interpolation and limiting do not reconstruct clipped
+  words. The report counts damaged samples instead of promising repair.
 * **No ASR.** Filler Killer is acoustic only. The "modalità precisa" that would
   detect individual filler *words* is a separate, larger project and is
   deliberately absent.
